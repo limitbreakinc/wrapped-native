@@ -6,7 +6,7 @@ import "forge-std/StdCheats.sol";
 import "forge-std/StdUtils.sol";
 import "forge-std/console.sol";
 import "../helpers/AddressSet.sol";
-import "../WETH9.sol";
+import "src/IWrappedNative.sol";
 
 uint256 constant ETH_SUPPLY = 120_500_000 ether;
 
@@ -19,7 +19,7 @@ contract ForcePush {
 contract Handler is CommonBase, StdCheats, StdUtils {
     using LibAddressSet for AddressSet;
 
-    WETH9 public weth;
+    IWrappedNative public weth;
 
     uint256 public ghost_depositSum;
     uint256 public ghost_withdrawSum;
@@ -50,7 +50,7 @@ contract Handler is CommonBase, StdCheats, StdUtils {
         _;
     }
 
-    constructor(WETH9 _weth) {
+    constructor(IWrappedNative _weth) {
         weth = _weth;
         deal(address(this), ETH_SUPPLY);
     }

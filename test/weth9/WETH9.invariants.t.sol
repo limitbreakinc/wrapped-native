@@ -2,16 +2,18 @@
 pragma solidity 0.8.17;
 
 import "forge-std/Test.sol";
-import "./WETH9.sol";
+import "src/IWrappedNative.sol";
 
 import "./handlers/Handler.sol";
 
-contract WETH9Invariants is Test {
-    WETH9 public weth;
+abstract contract WETH9Invariants is Test {
+    IWrappedNative public weth;
     Handler public handler;
 
+    function createWrappedNativeInstance() public virtual;
+
     function setUp() public {
-        weth = new WETH9();
+        createWrappedNativeInstance();
         handler = new Handler(weth);
 
         bytes4[] memory selectors = new bytes4[](6);
