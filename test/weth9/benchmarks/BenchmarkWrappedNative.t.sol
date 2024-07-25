@@ -1,4 +1,4 @@
-pragma solidity 0.8.17;
+pragma solidity 0.8.26;
 
 import "./BenchmarkBase.t.sol";
 import "src/WrappedNative.sol";
