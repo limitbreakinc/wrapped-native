@@ -29,59 +29,25 @@ contract WrappedNative {
         emit Deposit(msg.sender, msg.value);
     }
     function withdraw(uint wad) public {
-//        uint256 balance = balanceOf[msg.sender];
-//        unchecked {
-//            uint256 updatedBalance = balance - wad;
-//            if (updatedBalance > balance) {
-//                revert();
-//            }
-//            balanceOf[msg.sender] = updatedBalance;
-//        }
-//
-//        bool success;
-//
-//        assembly {
-//            // Transfer the ETH and store if it succeeded or not.
-//            success := call(gas(), caller(), wad, 0, 0, 0, 0)
-//        }
-//
-//        if (!success) {
-//            revert();
-//        }
-//
-//        emit Withdrawal(msg.sender, wad);
-
-//        require(balanceOf[msg.sender] >= wad);
-//        balanceOf[msg.sender] -= wad;
-//        payable(msg.sender).transfer(wad);
-//        emit Withdrawal(msg.sender, wad);
-        
-        uint256 callerBalance = balanceOf[msg.sender];
-        if (callerBalance < wad) {
-            revert();
-        }
+        uint256 balance = balanceOf[msg.sender];
         unchecked {
-            balanceOf[msg.sender] = callerBalance - wad;
+            uint256 updatedBalance = balance - wad;
+            if (updatedBalance > balance) {
+                revert();
+            }
+            balanceOf[msg.sender] = updatedBalance;
         }
-        
-        // Version 1
-        //payable(msg.sender).transfer(wad);
-
-        // Version 2
-        //assembly {
-        //    let success := call(gas(), caller(), wad, 0, 0, 0, 0)
-        //    if iszero(success) {
-        //        revert(0, 0)
-        //    }
-        //}
-
-        // Version 3
-        //(bool s,) = msg.sender.call{value: wad}("");
-        //if (!s) {
-        //    revert();
-        //}
 
         emit Withdrawal(msg.sender, wad);
+
+        assembly {
+            // Transfer the ETH and store if it succeeded or not.
+            let success := call(gas(), caller(), wad, 0, 0, 0, 0)
+
+            if iszero(success) {
+                revert(0, 0)
+            }
+        }
     }
 
     function totalSupply() public view returns (uint) {
