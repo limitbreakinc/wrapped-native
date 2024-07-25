@@ -130,3 +130,5 @@ dist
 .pnp.*
 
 forge-cache/
+
+.DS_Store

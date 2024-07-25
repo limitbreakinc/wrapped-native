@@ -38,6 +38,7 @@ contract WrappedNative {
             log2(0x00, 0x20, DEPOSIT_EVENT_TOPIC_0, caller())
         }
     }
+
     function withdraw(uint256 wad) public {
         assembly {
             mstore(0x00, caller())
@@ -63,7 +64,6 @@ contract WrappedNative {
             return(0x00, 0x20)
         }
     }
-
 
     function approve(address guy, uint256 wad) public returns (bool) {
         assembly {

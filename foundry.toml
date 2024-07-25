@@ -10,17 +10,18 @@ gas_reports = ["*"]
 
 solc_version = "0.8.26"
 evm_version = 'london'
+via_ir = true
 
 optimizer = true
-optimizer_runs = 100000
+optimizer_runs = 1000000
 
 [fuzz]
 runs = 200
 max_test_rejects = 2560000
 
 [invariant]
-runs = 50
-depth = 350
+runs = 200
+depth = 500
 fail_on_revert = false
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
