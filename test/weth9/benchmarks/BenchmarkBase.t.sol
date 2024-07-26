@@ -11,7 +11,6 @@ abstract contract BenchmarkBase is Test {
     event  Withdrawal(address indexed src, uint256 wad);
 
     IWrappedNative public token;
-    address public target;
 
     address public coldAccount = address(0x1234567890123456789012345678901234567890);
     address public warmAccount = address(0x1234567890123456789012345678901234567891);
@@ -24,7 +23,6 @@ abstract contract BenchmarkBase is Test {
 
     function setUp() public {
       createWrappedNativeInstance();
-      target = address(0x000000000000000000000000000000000000dEaD);
 
       vm.deal(warmAccount, 100 ether);
       vm.deal(coldAccount, 100 ether);
