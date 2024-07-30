@@ -1,5 +1,11 @@
 pragma solidity 0.8.26;
 
+interface IRecoverTokens {
+    function transfer(address /*_to*/, uint256 /*_value*/) external returns (bool);
+    function transferFrom(address /*_from*/, address /*_to*/, uint256 /*_tokenId*/) external;
+    function safeTransferFrom(address /*_from*/, address /*_to*/, uint256 /*_id*/, uint256 /*_value*/, bytes calldata /*_data*/) external;
+}
+
 contract WrappedNative {
     string public name     = "Wrapped Native";
     string public symbol   = "WNATIVE";
@@ -10,6 +16,10 @@ contract WrappedNative {
     uint256 private constant APPROVAL_EVENT_TOPIC_0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
     uint256 private constant TRANSFER_EVENT_TOPIC_0 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
 
+    address private constant RECOVERY_TAX_ADDRESS = address(0x0); // TODO
+    uint256 private constant RECOVERY_TAX_BPS = 5_000;
+    uint256 private constant RECOVERY_TAX_DENOMINATOR = 10_000;
+
     event  Approval(address indexed src, address indexed guy, uint256 wad);
     event  Transfer(address indexed src, address indexed dst, uint256 wad);
     event  Deposit(address indexed dst, uint256 wad);
@@ -19,27 +29,48 @@ contract WrappedNative {
     mapping (address => mapping (address => uint))  public  allowance;
 
     fallback() external payable {
-        deposit();
+        depositFor(msg.sender);
     }
 
     receive() external payable {
-        deposit();
+        depositFor(msg.sender);
     }
 
     function deposit() public payable {
+        depositFor(msg.sender);
+    }
+
+    function depositFor(address dst) public payable {
         assembly {
-            mstore(0x00, caller())
+            mstore(0x00, dst)
             mstore(0x20, balanceOf.slot)
             let balanceSlot := keccak256(0x00, 0x40)
 
             sstore(balanceSlot, add(sload(balanceSlot), callvalue()))
 
             mstore(0x00, callvalue())
-            log2(0x00, 0x20, DEPOSIT_EVENT_TOPIC_0, caller())
+            log2(0x00, 0x20, DEPOSIT_EVENT_TOPIC_0, dst)
         }
     }
 
     function withdraw(uint256 wad) public {
+        withdrawForADestinationWallet(msg.sender, wad);
+    }
+
+    function withdrawSplit(address[] calldata toAddresses, uint256[] calldata amounts) external {
+        if (toAddresses.length != amounts.length || toAddresses.length == 0) {
+            revert();
+        }
+
+        for (uint256 i = 0; i < toAddresses.length;) {
+            withdrawForADestinationWallet(toAddresses[i], amounts[i]);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function withdrawForADestinationWallet(address to, uint256 wad) public {
         assembly {
             mstore(0x00, caller())
             mstore(0x20, balanceOf.slot)
@@ -52,7 +83,7 @@ contract WrappedNative {
             mstore(0x00, wad)
             log2(0x00, 0x20, WITHDRAWAL_EVENT_TOPIC_0, caller())
 
-            if or(gt(updatedBalance, balanceVal), iszero(call(gas(), caller(), wad, 0, 0, 0, 0))) {
+            if or(gt(updatedBalance, balanceVal), iszero(call(gas(), to, wad, 0, 0, 0, 0))) {
                 revert(0,0)
             }
         }
@@ -65,7 +96,11 @@ contract WrappedNative {
         }
     }
 
-    function approve(address guy, uint256 wad) public returns (bool) {
+    function approve(address guy, uint256 wad) public payable returns (bool) {
+        if (msg.value > 0) {
+            deposit();
+        }
+
         assembly {
             mstore(0x00, caller())
             mstore(0x20, allowance.slot)
@@ -83,14 +118,18 @@ contract WrappedNative {
         }
     }
 
-    function transfer(address dst, uint wad) public returns (bool) {
+    function transfer(address dst, uint256 wad) public payable returns (bool) {
         return transferFrom(msg.sender, dst, wad);
     }
 
     function transferFrom(address src, address dst, uint wad)
-        public
+        public payable
         returns (bool)
     {
+        if (msg.value > 0) {
+            deposit();
+        }
+
         assembly {
             mstore(0x00, dst)
             mstore(0x20, balanceOf.slot)
@@ -125,6 +164,21 @@ contract WrappedNative {
 
             mstore(0x00, 0x01)
             return(0x00, 0x20)
+        }
+    }
+
+    function recoverStrandedTokens(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) external {
+        if (tokenStandard == 20) {
+            uint256 recoveryTaxAmount = amount * RECOVERY_TAX_BPS / RECOVERY_TAX_DENOMINATOR;
+            uint256 mevAmount = amount - recoveryTaxAmount;
+            IRecoverTokens(token).transfer(RECOVERY_TAX_ADDRESS, recoveryTaxAmount);
+            IRecoverTokens(token).transfer(to, mevAmount);
+        } else if (tokenStandard == 721) {
+            IRecoverTokens(token).transferFrom(address(this), to, tokenId);
+        } else if (tokenStandard == 1155) {
+            IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId, amount, "");
+        } else {
+            revert();
         }
     }
 }
