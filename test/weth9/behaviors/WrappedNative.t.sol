@@ -9,6 +9,7 @@ import "./weth9.sol";
 
 import "forge-std/Test.sol";
 import "src/WrappedNative.sol";
+import "src/IWrappedNative.sol";
 
 interface ERC20Events {
     event Approval(address indexed src, address indexed guy, uint256 wad);
@@ -198,7 +199,7 @@ contract WETH9BehaviorTest is Test, WETHEvents {
     }
 
     function assert_weth_supply(uint supply) public {
-        assertEq(weth.totalSupply(), supply);
+        assertEq(IWrappedNative(address(weth)).totalSupply(), supply);
     }
 
     function perform_join(Guy guy, uint wad) public {

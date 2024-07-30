@@ -7,9 +7,9 @@ interface IRecoverTokens {
 }
 
 contract WrappedNative {
-    string public name     = "Wrapped Native";
-    string public symbol   = "WNATIVE";
-    uint8  public decimals = 18;
+    string private constant NAME = "Wrapped Native";
+    string private constant SYMBOL = "WNATIVE";
+    uint8 private constant DECIMALS = 18;
 
     uint256 private constant WITHDRAWAL_EVENT_TOPIC_0 = 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65;
     uint256 private constant DEPOSIT_EVENT_TOPIC_0 = 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c;
@@ -29,7 +29,31 @@ contract WrappedNative {
     mapping (address => mapping (address => uint))  public  allowance;
 
     fallback() external payable {
-        depositFor(msg.sender);
+        if (msg.value > 0) {
+            depositFor(msg.sender);
+        } else {
+            if (msg.sig == 0x18160ddd) { // totalSupply()
+                assembly {
+                    mstore(0x00, selfbalance())
+                    return(0x00, 0x20)
+                }
+            } else if (msg.sig == 0x06fdde03) { // name()
+                bytes memory nameReturnValue = abi.encode(NAME);
+                assembly {
+                    return(add(nameReturnValue, 0x20), mload(nameReturnValue))
+                }
+            } else if (msg.sig == 0x95d89b41) { // symbol()
+                bytes memory symbolReturnValue = abi.encode(SYMBOL);
+                assembly {
+                    return(add(symbolReturnValue, 0x20), mload(symbolReturnValue))
+                }
+            } else if (msg.sig == 0x313ce567) { // decimals()
+                assembly {
+                    mstore(0x00, 0x12) // 18
+                    return(0x00, 0x20)
+                }
+            }
+        }
     }
 
     receive() external payable {
@@ -89,13 +113,6 @@ contract WrappedNative {
         }
     }
 
-    function totalSupply() public view returns (uint256) {
-        assembly {
-            mstore(0x00, selfbalance())
-            return(0x00, 0x20)
-        }
-    }
-
     function approve(address guy, uint256 wad) public payable returns (bool) {
         if (msg.value > 0) {
             deposit();
@@ -122,7 +139,7 @@ contract WrappedNative {
         return transferFrom(msg.sender, dst, wad);
     }
 
-    function transferFrom(address src, address dst, uint wad)
+    function transferFrom(address src, address dst, uint256 wad)
         public payable
         returns (bool)
     {
