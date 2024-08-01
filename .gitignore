@@ -134,3 +134,5 @@ forge-cache/
 .DS_Store
 
 cache/
+
+docs/
