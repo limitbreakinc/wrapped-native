@@ -5,21 +5,72 @@ import "./IRecoverTokens.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 
+/**
+ * @title  WrappedNative
+ * @author Limit Break, Inc.
+ * @notice A contract that wraps native tokens (e.g. Ether) into an ERC-20 token.  Designed as a
+ *         canonical replacement for WETH9 that can be deployed to a consistent, deterministic address on all chains.
+ *
+ * @notice WrappedNative features the following improvements over WETH9:
+ *
+ * @notice - **Deterministically Deployable By Anyone To A Consistent Address On Any Chain!**
+ * @notice - **More Gas Efficient Operations Than WETH9!**
+ * @notice - **`approve` and `transfer` functions are payable** - will auto-deposit when `msg.value > 0`.  This feature
+ *           will allow a user to wrap and approve a protocol in a single action instead of two, improving UX and saving gas.
+ * @notice - **`depositTo`** - allows a depositor to specify the address to give WNATIVE to.  
+ *           Much more gas efficient for operations such as native refunds from protocols compared to `deposit + transfer`.
+ * @notice - **`withdrawToAccount`** - allows a withdrawer to withdraw to a different address.
+ * @notice - **`withdrawSplit`** - allows a withdrawer to withdraw and send native tokens to several addresses at once.
+ * @notice - **Permit Functions** - allows for transfers and withdrawals to be approved to spenders/operators gaslessly using EIP-712 signatures.
+ *           Permitted withdrawals allow gas sponsorship to unwrap wrapped native tokens on the user's behalf, for a small convenience fee specified by the app.
+ *           This is useful when user has no native tokens on a new chain but they have received wrapped native tokens.
+ * @notice - **Lost Token Recovery** - allows anyone to recover ERC20/721/1155 tokens that were accidentally sent to this contract.
+ * @notice - **Lost Wrapped Native Recovery** - allows anyone to recover wrapped native tokens that were accidentally sent to the zero address that would be otherwise lost.
+ */
+
 contract WrappedNative is EIP712 {
-    mapping (address => uint256)                    private _masterNonces;
+
+    /// @dev Storage of user master nonces for permit processing.
+    mapping (address => uint256)                      private _masterNonces;
+
+    /// @dev Storage of permit nonces for permit processing.  Uses bitmaps for gas-efficient storage.
     mapping (address => mapping (uint256 => uint256)) private _permitNonces;
 
-    mapping (address => uint256)                    public  balanceOf;
-    mapping (address => mapping (address => uint))  public  allowance;
+    /// @notice Stores the wrapped native token balance of each user.
+    mapping (address => uint256)                      public  balanceOf;
+
+    /// @notice Stores the wrapped native token allowance for each user/spender pair.
+    mapping (address => mapping (address => uint))    public  allowance;
 
     constructor() EIP712(NAME, VERSION) {}
 
-    /**
-     * =================================================
-     * == Deposit / Fallback Function Implementations ==
-     * =================================================
-     */
+    //=================================================
+    //== Deposit / Fallback Function Implementations ==
+    //=================================================
 
+    /**
+     * @notice Fallback function to deposit funds into the contract, or to call various view functions.
+     *         If the `msg.value` is greater than zero, the function will deposit the funds into the
+     *         `msg.sender` account. If the `msg.value` is zero, the function will check the `msg.sig`
+     *         to determine which view function is being called.  If a matching function selector is found
+     *         the function will execute and return the appropriate value. If no matching function selector is found,
+     *         the function will revert.
+     *         
+     * @notice The reason seldom-used view functions have been implemented via fallback is to save gas costs
+     *         elsewhere in the contract in common operations that have a runtime gas cost.
+     *
+     * @notice The following function selectors are implemented via fallback:
+     * 
+     * @notice - **function isNonceUsed(address account, uint256 nonce) external view returns (bool)**
+     * @notice - **function masterNonces(address account) external view returns (uint256)**
+     * @notice - **function totalSupply() external view returns (uint256)**
+     * @notice - **function domainSeparatorV4() external view returns (bytes32)**
+     * @notice - **function name() external view returns (string)**
+     * @notice - **function symbol() external view returns (string)**
+     * @notice - **function decimals() external view returns (uint8)**
+     *
+     * @dev     Throws when `msg.value` == 0 and the `msg.sig` does not match any of the implemented view functions.
+     */
     fallback() external payable {
         if (msg.value > 0) {
             deposit();
@@ -70,20 +121,42 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @notice Deposits `msg.value` funds into the `msg.sender` account, increasing their wrapped native token balance.
+     * @notice This function is triggered when native funds are sent to this contract with no calldata.
+     */
     receive() external payable {
         deposit();
     }
 
-    /**
-     * =================================================
-     * ========== Basic Deposits / Withdrawals =========
-     * =================================================
-     */
+    //=================================================
+    //========== Basic Deposits / Withdrawals =========
+    //=================================================
 
+    /**
+     * @notice Deposits `msg.value` funds into the `msg.sender` account, increasing their wrapped native token balance.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has increased by `msg.value`.
+     * @dev    2. The `msg.sender`'s native token balance has decreased by `msg.value`.
+     * @dev    3. The `msg.sender`'s wrapped native token balance has increased by `msg.value`.
+     * @dev    4. A `Deposit` event has been emitted.  The `msg.sender` address is logged in the event.
+     */
     function deposit() public payable {
         depositTo(msg.sender);
     }
 
+    /**
+     * @notice Deposits `msg.value` funds into specified user's account, increasing their wrapped native token balance.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has increased by `msg.value`.
+     * @dev    2. The `msg.sender`'s native token balance has decreased by `msg.value`.
+     * @dev    3. The `to` account's wrapped native token balance has increased by `msg.value`.
+     * @dev    4. A `Deposit` event has been emitted.  Caveat: The `to` address is logged in the event, not `msg.sender`.
+     *
+     * @param to  The address that receives wrapped native tokens.
+     */
     function depositTo(address to) public payable {
         assembly {
             mstore(0x00, to)
@@ -97,14 +170,61 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @notice Withdraws `amount` funds from the `msg.sender` account, decreasing their wrapped native token balance.
+     *
+     * @dev    Throws when the `msg.sender`'s wrapped native token balance is less than `amount` to withdraw.
+     * @dev    Throws when the unwrapped native funds cannot be transferred to the `msg.sender` account.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has decreased by `amount`.
+     * @dev    2. The `msg.sender`'s wrapped native token balance has decreased by `amount`.
+     * @dev    3. The `msg.sender`'s native token balance has increased by `amount`.
+     * @dev    4. A `Withdrawal` event has been emitted.  The `msg.sender` address is logged in the event.
+     *
+     * @param amount  The amount of wrapped native tokens to withdraw.
+     */
     function withdraw(uint256 amount) public {
         withdrawToAccount(msg.sender, amount);
     }
 
+    /**
+     * @notice Withdraws `amount` funds from the `msg.sender` account, decreasing their wrapped native token balance.
+     *
+     * @dev    Throws when the `msg.sender`'s wrapped native token balance is less than `amount` to withdraw.
+     * @dev    Throws when the unwrapped native funds cannot be transferred to the `to` account.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has decreased by `amount`.
+     * @dev    2. The `msg.sender`'s wrapped native token balance has decreased by `amount`.
+     * @dev    3. The `to` account's native token balance has increased by `amount`.
+     * @dev    4. A `Withdrawal` event has been emitted.  Caveat: The `msg.sender` address is logged in the event, not `to`.
+     *
+     * @param to  The address that receives the unwrapped native tokens.
+     * @param amount  The amount of wrapped native tokens to withdraw.
+     */
     function withdrawToAccount(address to, uint256 amount) public {
         _withdrawFromAccount(msg.sender, to, amount);
     }
 
+    /**
+     * @notice Withdraws funds from the `msg.sender` and splits the funds between multiple receiver addresses.
+     *
+     * @dev    Throws when the `msg.sender`'s wrapped native token balance is less than the sum of `amounts` to withdraw.
+     * @dev    Throws when the unwrapped native funds cannot be transferred to one or more of the receiver addresses.
+     * @dev    Throws when the `toAddresses` and `amounts` arrays are not the same length.
+     * @dev    Throws when the `toAddresses` array is empty.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has decreased by the sum of `amounts`.
+     * @dev    2. The `msg.sender`'s wrapped native token balance has decreased by the sum of `amounts`.
+     * @dev    3. The receiver addresses' native token balances have increased by the corresponding amounts in `amounts`.
+     * @dev    4. A `Withdrawal` event has been emitted for each receiver address.  Caveat: The `msg.sender` address is 
+     *            logged in the events, not the receiver address.
+     *
+     * @param toAddresses  The addresses that receive the unwrapped native tokens.
+     * @param amounts  The amounts of wrapped native tokens to withdraw for each receiver address.
+     */
     function withdrawSplit(address[] calldata toAddresses, uint256[] calldata amounts) external {
         if (toAddresses.length != amounts.length || toAddresses.length == 0) {
             revert();
@@ -118,12 +238,37 @@ contract WrappedNative is EIP712 {
         }
     }
 
-    /**
-     * =================================================
-     * ========== ERC-20 Approvals & Transfers =========
-     * =================================================
-     */
+    //=================================================
+    //========== ERC-20 Approvals & Transfers =========
+    //=================================================
 
+    /**
+     * @notice Approves `spender` to spend/transfer `amount` of the `msg.sender`'s wrapped native tokens.
+     *         When `amount` is set to `type(uint256).max`, the approval is unlimited.
+     *
+     * @notice Unlike a typical ERC-20 token, this function is payable, allowing for a `deposit` and approval to be
+     *         executed simultaneously.  If `msg.value` is greater than zero, the function will deposit the funds
+     *         into the `msg.sender` account before approving the `spender` to spend/transfer the funds.
+     *         If `msg.value` is zero, the function will only approve the `spender` to spend/transfer the funds.
+     *         This feature is intended to improve the UX of users using wrapped native tokens so that users don't have
+     *         to perform two transactions to first deposit, then approve the spending of their tokens, saving gas in
+     *         the process.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. The `spender` is approved to spend/transfer `amount` of the `msg.sender`'s wrapped native tokens.
+     * @dev    2. A `Approval` event has been emitted.  The `msg.sender` address, `spender` address, and `amount` of the 
+     *            updated approval are logged in the event.
+     * @dev    3. If `msg.value` is greater than zero, the `msg.sender`'s wrapped native token balance has increased by 
+     *            `msg.value`.
+     * @dev    4. If `msg.value` is greater than zero, a `Deposit` event has been emitted.  The `msg.sender` address is 
+     *            logged in the event.
+     *
+     * @param spender  The address that is approved to spend/transfer the `msg.sender`'s wrapped native tokens.
+     * @param amount   The amount of wrapped native tokens that the `spender` is approved to spend/transfer. Approved
+     *                 spending is unlimited when this values is set to `type(uint256).max`.
+     *
+     * @return Always returns `true`.
+     */
     function approve(address spender, uint256 amount) public payable returns (bool) {
         if (msg.value > 0) {
             deposit();
@@ -146,10 +291,58 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @notice Transfers an `amount` of wrapped native tokens from the `msg.sender` to the `to` address.
+     *
+     * @notice If the `msg.value` is greater than zero, the function will deposit the funds into the `msg.sender` account
+     *         before transferring the wrapped funds.  Otherwise, the function will only transfer the funds.
+     *
+     * @dev    Throws when the `msg.sender` has an insufficient balance to transfer `amount` of wrapped native tokens.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. When `msg.value` is greater than zero, this contract's native token balance has increased by `msg.value`.
+     * @dev    2. When `msg.value` is greater than zero, the `msg.sender`'s native token balance has decreased by `msg.value`.
+     * @dev    3. When `msg.value` is greater than zero, the `msg.sender`'s wrapped native token balance has increased by `msg.value`.
+     * @dev    4. When `msg.value` is greater than zero, a `Deposit` event has been emitted.  The `msg.sender` address is logged in the event.
+     * @dev    5. The `amount` of wrapped native tokens has been transferred from the `msg.sender` account to the `to` account.
+     * @dev    6. A `Transfer` event has been emitted.  The `msg.sender` address, `to` address, and `amount` are logged in the event.
+     *
+     * @param to  The address that receives the wrapped native tokens.
+     * @param amount  The amount of wrapped native tokens to transfer.
+     *
+     * @return Always returns `true`.
+     */
     function transfer(address to, uint256 amount) public payable returns (bool) {
         return transferFrom(msg.sender, to, amount);
     }
 
+    /**
+     * @notice Transfers an `amount` of wrapped native tokens from the `from` to the `to` address.
+     *
+     * @notice If the `msg.value` is greater than zero, the function will deposit the funds into the `from` account
+     *         before transferring the wrapped funds.  Otherwise, the function will only transfer the funds.
+     * @notice **As a reminder, the `msg.sender`'s native tokens will be deposited and the `from` (not the `msg.sender`) 
+     *         address will be credited before the transfer.  Integrating spender/operator protocols MUST be aware that 
+     *         deposits made during transfers will not credit their own account.**
+     *
+     * @dev    Throws when the `from` account has an insufficient balance to transfer `amount` of wrapped native tokens.
+     * @dev    Throws when the `msg.sender` is not the `from` address, and the `msg.sender` has not been approved
+     *         by `from` for an allowance greater than or equal to `amount`.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. When `msg.value` is greater than zero, this contract's native token balance has increased by `msg.value`.
+     * @dev    2. When `msg.value` is greater than zero, the `msg.sender`'s native token balance has decreased by `msg.value`.
+     * @dev    3. When `msg.value` is greater than zero, the `from` account's wrapped native token balance has increased by `msg.value`.
+     * @dev    4. When `msg.value` is greater than zero, a `Deposit` event has been emitted.  The `from` address is logged in the event.
+     * @dev    5. The `amount` of wrapped native tokens has been transferred from the `from` account to the `to` account.
+     * @dev    6. A `Transfer` event has been emitted.  The `from` address, `to` address, and `amount` are logged in the event.
+     *
+     * @param from  The address that transfers the wrapped native tokens.
+     * @param to    The address that receives the wrapped native tokens.
+     * @param amount  The amount of wrapped native tokens to transfer.
+     *
+     * @return Always returns `true`.
+     */
     function transferFrom(address from, address to, uint256 amount) public payable returns (bool) {
         if (msg.value > 0) {
             depositTo(from);
@@ -192,12 +385,18 @@ contract WrappedNative is EIP712 {
         }
     }
 
-    /**
-     * =================================================
-     * ======= Permitted Transfers / Withdrawals =======
-     * =================================================
-     */
+    //=================================================
+    //======= Permitted Transfers / Withdrawals =======
+    //=================================================
 
+    /**
+     * @notice Allows the `msg.sender` to revoke/cancel all prior permitted transfer and withdrawal signatures.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. The `msg.sender`'s master nonce has been incremented by `1` in contract storage, rendering all signed
+     *            permits using the prior master nonce unusable.
+     * @dev    2. A `MasterNonceInvalidated` event has been emitted.
+     */
     function revokeMyOutstandingPermits() external {
         assembly {
             mstore(0x00, caller())
@@ -209,10 +408,63 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @notice Allows the `msg.sender` to revoke/cancel a single, previously signed permitted transfer or withdrawal 
+     *         signature by specifying the nonce of the individual permit.
+     *
+     * @dev    Throws when the `msg.sender` has already revoked the permit nonce.
+     * @dev    Throws when the permit nonce was already used successfully.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. The specified `nonce` for the `msg.sender` has been revoked and can
+     *            no longer be used to execute a permitted transfer or withdrawal.
+     * @dev    2. A `PermitNonceInvalidated` event has been emitted.
+     *
+     * @param  nonce The nonce that was signed in the permitted transfer or withdrawal.
+     */
     function revokeMyNonce(uint256 nonce) external {
         _checkAndInvalidateNonce(msg.sender, nonce);
     }
 
+    /**
+     * @notice Allows a spender/operator to transfer wrapped native tokens from the `from` account to the `to` account
+     *         using a gasless signature from the `from` account so that the `from` account does not need to pay gas
+     *         to set an on-chain allowance.
+     *
+     * @notice If the `msg.value` is greater than zero, the function will deposit the funds into the `from` account
+     *         before transferring the wrapped funds.  Otherwise, the function will only transfer the funds.
+     * @notice **As a reminder, the `msg.sender`'s native tokens will be deposited and the `from` (not the `msg.sender`) 
+     *         address will be credited before the transfer.  Integrating spender/operator protocols MUST be aware that 
+     *         deposits made during transfers will not credit their own account.**
+     *
+     * @dev    Throws when the `from` account is the zero address.
+     * @dev    Throws when the `msg.sender` does not match the operator/spender from the signed transfer permit.
+     * @dev    Throws when the permitAmount does not match the signed transfer permit. 
+     * @dev    Throws when the nonce does not match the signed transfer permit.
+     * @dev    Throws when the expiration does not match the signed transfer permit.
+     * @dev    Throws when the permit has expired.
+     * @dev    Throws when the requested transfer amount exceeds the maximum permitted transfer amount. 
+     * @dev    Throws when the permit nonce has already been used or revoked/cancelled.
+     * @dev    Throws when the master nonce has been revoked/cancelled since the permit was signed.
+     * @dev    Throws when the permit signature is invalid, or was not signed by the `from` account.
+     * @dev    Throws when the `from` account has an insufficient balance to transfer `transferAmount` of wrapped native tokens.
+     * 
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. When `msg.value` is greater than zero, this contract's native token balance has increased by `msg.value`.
+     * @dev    2. When `msg.value` is greater than zero, the `msg.sender`'s native token balance has decreased by `msg.value`.
+     * @dev    3. When `msg.value` is greater than zero, the `from` account's wrapped native token balance has increased by `msg.value`.
+     * @dev    4. When `msg.value` is greater than zero, a `Deposit` event has been emitted.  The `from` address is logged in the event.
+     * @dev    5. The `transferAmount` of wrapped native tokens has been transferred from the `from` account to the `to` account.
+     * @dev    6. A `Transfer` event has been emitted.  The `from` address, `to` address, and `transferAmount` are logged in the event.
+     *
+     * @param from  The address that transfers the wrapped native tokens.
+     * @param to    The address that receives the wrapped native tokens.
+     * @param transferAmount  The amount of wrapped native tokens to transfer.
+     * @param permitAmount  The maximum amount of wrapped native tokens that can be transferred, signed in permit.
+     * @param nonce  The nonce, signed in permit.
+     * @param expiration  The expiration timestamp, signed in permit.
+     * @param signedPermit  The signature of the permit.
+     */
     function permitTransfer(
         address from,
         address to,
@@ -221,11 +473,14 @@ contract WrappedNative is EIP712 {
         uint256 nonce,
         uint256 expiration,
         bytes calldata signedPermit
-    ) external {
+    ) external payable {
+        if (msg.value > 0) {
+            depositTo(from);
+        }
+
         if (block.timestamp > expiration ||
             transferAmount > permitAmount ||
-            from == address(0) ||
-            to == address(0)) {
+            from == address(0)) {
             revert();
         }
 
@@ -251,6 +506,41 @@ contract WrappedNative is EIP712 {
         _balanceTransfer(from, to, transferAmount);
     }
 
+    /**
+     * @notice Allows a spender/operator to withdraw wrapped native tokens from the `from` account to the `to` account
+     *         using a gasless signature signed by the `from` account to prove authorization of the withdrawal.
+     *
+     * @dev    Throws when the `from` account is the zero address.
+     * @dev    Throws when the `msg.sender` does not match the operator/spender from the signed withdrawal permit.
+     * @dev    Throws when the permit has expired.
+     * @dev    Throws when the amount does not match the signed withdrawal permit. 
+     * @dev    Throws when the nonce does not match the signed withdrawal permit.
+     * @dev    Throws when the expiration does not match the signed withdrawal permit.
+     * @dev    Throws when the convenience fee reciever and fee does not match the signed withdrawal permit.
+     * @dev    Throws when the `to` address does not match the signed withdrawal permit.
+     * @dev    Throws when the permit nonce has already been used or revoked/cancelled.
+     * @dev    Throws when the master nonce has been revoked/cancelled since the permit was signed.
+     * @dev    Throws when the permit signature is invalid, or was not signed by the `from` account.
+     * @dev    Throws when the `from` account has an insufficient balance to transfer `transferAmount` of wrapped native tokens.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. This contract's native token balance has decreased by `amount`, less convenience and infrastructure
+     *            fees that remain wrapped.
+     * @dev    2. The `from` account's wrapped native token balance has decreased by `amount`.
+     * @dev    3. The `to` account's native token balance has increased by `amount`, less convenience and/or infrastructure fees.
+     * @dev    4. The `convenienceFeeReceiver` account's wrapped native token balance has increased by the convenience fee.
+     * @dev    5. The infrastructure tax account's wrapped native token balance has increased by the infrastructure fee.
+     * @dev    6. A `Withdrawal` event has been emitted.  Caveat: The `from` address is logged in the event, not `to` or `msg.sender`.
+     *
+     * @param from  The address that from which funds are withdrawn.
+     * @param to  The address that receives the withdrawn funds.
+     * @param amount  The amount of wrapped native tokens to withdraw.
+     * @param nonce  The nonce, signed in permit.
+     * @param expiration  The expiration timestamp, signed in permit.
+     * @param convenienceFeeReceiver  The address that receives the convenience fee.
+     * @param convenienceFeeBps  The basis points of the convenience fee.
+     * @param signedPermit  The signature of the permit.
+     */
     function doPermittedWithdraw(
         address from,
         address to,
@@ -262,8 +552,7 @@ contract WrappedNative is EIP712 {
         bytes calldata signedPermit
     ) external {
         if (block.timestamp > expiration ||
-            from == address(0) ||
-            to == address(0)) {
+            from == address(0)) {
             revert();
         }
 
@@ -306,14 +595,29 @@ contract WrappedNative is EIP712 {
         _withdrawFromAccount(from, to, userAmount);
     }
 
-    /**
-     * =================================================
-     * ============ MEV-Based Asset Recovery ===========
-     * =================================================
-     */
+    //=================================================
+    //============ MEV-Based Asset Recovery ===========
+    //=================================================
 
+    /**
+     * @notice Recovers stranded wrapped native tokens from the zero address to the `to` address.
+     *         Wrapped native tokens are occasionally sent to the zero address by mistake, and this function
+     *         allows the stranded funds to be recovered through a MEV transaction.
+     *
+     * @dev    Throws when the `from` address is not the zero address.
+     * @dev    Throws when the wrapped native token balance of the zero address is less than `amount`.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. The zero address's wrapped native token balance has decreased by `amount`.
+     * @dev    2. The `to` account's wrapped native token balance has increased by `amount`, less recovery taxes.
+     * @dev    3. The infrastructure tax account's wrapped native token balance has increased by the recovery tax.
+     *
+     * @param from  Must be the zero address.
+     * @param to  The address that receives the stranded wrapped native tokens.
+     * @param amount  The amount of wrapped native tokens to recover.
+     */
     function recoverStrandedWNative(address from, address to, uint256 amount) external {
-        if (from == ADDRESS_ZERO || from == ADDRESS_DEAD) {
+        if (from == ADDRESS_ZERO) {
             (
                 uint256 recoveryTaxAmount, 
                 uint256 mevAmount
@@ -325,6 +629,30 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @notice Recovers stranded tokens from this contract to the `to` address.
+     *         Stranded tokens of all types (ERC20/ERC721/ERC1155) are occasionally sent to this contract by mistake, 
+     *         and this function allows the stranded tokens to be recovered through a MEV transaction.
+     *
+     * @dev    Throws when the `tokenStandard` is not a valid token standard (20/721/1155).
+     * @dev    Throws when the `token` address is the zero address.
+     * @dev    Throws when the `token` address is not a valid ERC20/ERC721/ERC1155 contract with matching transfer function.
+     * @dev    Throws for 721 and 1155 tokens when the receiver does not implement the correct callback functions for safe transfers.
+     * @dev    Throws when the recovered tokens are not owned by this contract, or the balance is insufficient to fulfill specified amount.
+     *
+     * @dev    <h4>Postconditions:</h4>
+     * @dev    1. The stranded tokens have been transferred from this contract to the `to` address.
+     * @dev    2. For ERC20 tokens, the `to` account has received the stranded tokens, less recovery taxes.
+     * @dev    3. For ERC20 tokens, the infrastructure tax account has received the recovery tax.
+     * @dev    4. For ERC721 tokens, the `to` account has received the stranded token.
+     * @dev    5. For ERC1155 tokens, the `to` account has received the stranded tokens.
+     *
+     * @param tokenStandard  The token standard of the stranded tokens (20/721/1155).
+     * @param token  The address of the stranded token contract.
+     * @param to  The address that receives the stranded tokens.
+     * @param tokenId  The token ID of the stranded ERC721 token.
+     * @param amount  The amount of stranded ERC20/ERC1155 tokens to recover.
+     */
     function recoverStrandedTokens(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) external {
         if (tokenStandard == TOKEN_STANDARD_ERC20) {
             (
@@ -342,12 +670,19 @@ contract WrappedNative is EIP712 {
         }
     }
 
-    /**
-     * =================================================
-     * ========= Miscellaneous Helper Functions ========
-     * =================================================
-     */
+    //=================================================
+    //========= Miscellaneous Helper Functions ========
+    //=================================================
 
+    /**
+     * @dev Helper function that transfers wrapped native token balance between accounts.
+     *
+     * @dev Throws when the `from` account has an insufficient balance to transfer `amount` of wrapped native tokens.
+     *
+     * @param from  The address from which the wrapped native tokens is transferred.
+     * @param to  The address to which the wrapped native tokens are transferred.
+     * @param amount  The amount of wrapped native tokens to transfer.
+     */
     function _balanceTransfer(address from, address to, uint256 amount) private {
         assembly {
             mstore(0x00, to)
@@ -368,6 +703,16 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @dev Helper function that withdraws wrapped native tokens from an account to another account.
+     *
+     * @dev Throws when the `from` account has an insufficient balance to transfer `amount` of wrapped native tokens.
+     * @dev Throws when the unwrapped native funds cannot be transferred to the `to` account.
+     *
+     * @param from  The address from which the wrapped native tokens are withdrawn.
+     * @param to  The address to which the native tokens are transferred.
+     * @param amount  The amount of wrapped native tokens to withdraw.
+     */
     function _withdrawFromAccount(address from, address to, uint256 amount) private {
         assembly {
             mstore(0x00, from)
@@ -387,6 +732,14 @@ contract WrappedNative is EIP712 {
         }
     }
 
+    /**
+     * @dev Helper function that checks and invalidates a permit nonce.
+     * 
+     * @dev Throws when the permit nonce has already been used or revoked/cancelled.
+     * 
+     * @param account  The account that signed the permit.
+     * @param nonce  The nonce that was signed in the permit.
+     */
     function _checkAndInvalidateNonce(address account, uint256 nonce) private {
         unchecked {
             if (uint256(_permitNonces[account][uint248(nonce >> 8)] ^= (ONE << uint8(nonce))) & 
@@ -400,12 +753,15 @@ contract WrappedNative is EIP712 {
         }
     }
 
-    /**
-     * =================================================
-     * ============= Fee Split Calculations ============
-     * =================================================
-     */
+    //=================================================
+    //============= Fee Split Calculations ============
+    //=================================================
 
+    /**
+     * @dev Helper function that computes the recovery tax and MEV split amounts.
+     * 
+     * @param amount  The amount of wrapped native tokens to split.
+     */
     function _computeRecoverySplits(
         uint256 amount
     ) private pure returns (uint256 recoveryTaxAmount, uint256 mevAmount) {
@@ -413,6 +769,13 @@ contract WrappedNative is EIP712 {
         mevAmount = amount - recoveryTaxAmount;
     }
 
+    /**
+     * @dev Helper function that computes the withdrawal fee split amounts.
+     *
+     * @param amount  The amount of wrapped native tokens to split.
+     * @param convenienceFeeReceiver  The address that receives the convenience fee.
+     * @param convenienceFeeBps  The basis points of the convenience fee.
+     */
     function _computeWithdrawalSplits(
         uint256 amount,
         address convenienceFeeReceiver,
@@ -431,11 +794,9 @@ contract WrappedNative is EIP712 {
         userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
     }
 
-    /**
-     * =================================================
-     * ============ Signature Verification =============
-     * =================================================
-     */
+    //=================================================
+    //============ Signature Verification =============
+    //=================================================
 
     /**
      * @notice  Verifies a permit signature based on the bytes length of the signature provided.

@@ -16,7 +16,6 @@ uint256 constant TOKEN_STANDARD_ERC721 = 721;
 uint256 constant TOKEN_STANDARD_ERC1155 = 1155;
 
 address constant ADDRESS_ZERO = address(0x0000000000000000000000000000000000000000);
-address constant ADDRESS_DEAD = address(0x000000000000000000000000000000000000dEaD);
 address constant ADDRESS_INFRASTRUCTURE_TAX = address(0x0); // TODO
 
 // uint256(keccak256("Withdrawal(address,uint256)"));
