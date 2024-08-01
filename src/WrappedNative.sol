@@ -329,16 +329,16 @@ contract WrappedNative is EIP712 {
     }
 
     function recoverStrandedTokens(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) external {
-        if (tokenStandard == 20) {
+        if (tokenStandard == TOKEN_STANDARD_ERC20) {
             (
                 uint256 recoveryTaxAmount, 
                 uint256 mevAmount
             ) = _computeRecoverySplits(amount);
             IRecoverTokens(token).transfer(ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
             IRecoverTokens(token).transfer(to, mevAmount);
-        } else if (tokenStandard == 721) {
+        } else if (tokenStandard == TOKEN_STANDARD_ERC721) {
             IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId);
-        } else if (tokenStandard == 1155) {
+        } else if (tokenStandard == TOKEN_STANDARD_ERC1155) {
             IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId, amount, "");
         } else {
             revert();
