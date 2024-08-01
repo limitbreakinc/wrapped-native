@@ -1,0 +1,49 @@
+pragma solidity 0.8.26;
+
+import "./IWrappedNative.sol";
+
+interface IWrappedNativeExtended is IWrappedNative {
+    // Wrapped Native Permit Specific
+    event PermitNonceInvalidated(address indexed account,uint256 indexed nonce);
+    event MasterNonceInvalidated(address indexed account, uint256 indexed nonce);
+
+    // Enhancements for Deposits and Withdrawals
+    function depositTo(address to) external payable;
+    function withdrawToAccount(address to, uint256 amount) external;
+    function withdrawSplit(address[] calldata toAddresses, uint256[] calldata amounts) external;
+
+    // Permit Processing
+    function revokeMyOutstandingPermits() external;
+    function revokeMyNonce(uint256 nonce) external;
+
+    function permitTransfer(
+        address from,
+        address to,
+        uint256 transferAmount,
+        uint256 permitAmount,
+        uint256 nonce,
+        uint256 expiration,
+        bytes calldata signedPermit
+    ) external;
+
+    function doPermittedWithdraw(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 nonce,
+        uint256 expiration,
+        address convenienceFeeReceiver,
+        uint256 convenienceFeeBps,
+        bytes calldata signedPermit
+    ) external;
+
+    // MEV-Based Asset Recovery
+    function recoverStrandedWNative(address from, address to, uint256 amount) external;
+    function recoverStrandedTokens(
+        uint256 tokenStandard, 
+        address token, 
+        address to, 
+        uint256 tokenId, 
+        uint256 amount
+    ) external;
+}
