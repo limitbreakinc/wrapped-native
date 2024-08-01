@@ -150,12 +150,9 @@ contract WrappedNative is EIP712 {
         return transferFrom(msg.sender, to, amount);
     }
 
-    function transferFrom(address from, address to, uint256 amount)
-        public payable
-        returns (bool)
-    {
+    function transferFrom(address from, address to, uint256 amount) public payable returns (bool) {
         if (msg.value > 0) {
-            deposit();
+            depositTo(from);
         }
 
         assembly {
