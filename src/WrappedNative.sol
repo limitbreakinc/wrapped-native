@@ -1,60 +1,18 @@
 pragma solidity 0.8.26;
 
+import "./Constants.sol";
+import "./IRecoverTokens.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 
-interface IRecoverTokens {
-    function transfer(address /*_to*/, uint256 /*_value*/) external returns (bool);
-    function safeTransferFrom(address /*_from*/, address /*_to*/, uint256 /*_tokenId*/) external;
-    function safeTransferFrom(address /*_from*/, address /*_to*/, uint256 /*_id*/, uint256 /*_value*/, bytes calldata /*_data*/) external;
-}
-
 contract WrappedNative is EIP712 {
-    string private constant NAME = "Wrapped Native";
-    string private constant SYMBOL = "WNATIVE";
-    uint8 private constant DECIMALS = 18;
-
-    /// @dev Constant value of 0
-    uint256 private constant ZERO = 0;
-    /// @dev Constant value of 1
-    uint256 private constant ONE = 1;
-
-    /// @dev Constant value to mask the upper bits of a signature that uses a packed `vs` value to extract `s`
-    bytes32 constant UPPER_BIT_MASK = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-
-    uint256 private constant WITHDRAWAL_EVENT_TOPIC_0 = 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65;
-    uint256 private constant DEPOSIT_EVENT_TOPIC_0 = 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c;
-    uint256 private constant APPROVAL_EVENT_TOPIC_0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
-    uint256 private constant TRANSFER_EVENT_TOPIC_0 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
-    uint256 private constant PERMIT_NONCE_INVALIDATED_EVENT_TOPIC_0 = 0x8dc5a0b2e80f26187d38744e9559150e3bd6e06fccefbe737fd33411cfb15151;
-    uint256 private constant MASTER_NONCE_INVALIDATED_EVENT_TOPIC_0 = 0x9614574d6542397172c19ba2bf4588434feeb977576e92b7b59b38242ab59609;
-
-    bytes32 private constant PERMIT_TRANSFER_TYPEHASH =
-        keccak256("PermitTransfer(address operator,uint256 amount,uint256 nonce,uint256 expiration,uint256 masterNonce)");
-
-    bytes32 private constant PERMIT_WITHDRAWAL_TYPEHASH =
-        keccak256("PermitWithdrawal(address operator,uint256 amount,uint256 nonce,uint256 expiration,uint256 masterNonce,address to,address convenienceFeeReceiver,uint256 convenienceFeeBps)");
-
-    address private constant INFRASTRUCTURE_TAX_ADDRESS = address(0x0); // TODO
-    
-    uint256 private constant RECOVERY_TAX_BPS = 1_000;
-
-    uint256 private constant CONVENIENCE_FEE_TAX_BPS = 1_000;
-
-    uint256 private constant FEE_DENOMINATOR = 10_000;
-
-    address private constant ADDRESS_ZERO = address(0x0000000000000000000000000000000000000000);
-    address private constant ADDRESS_DEAD = address(0x000000000000000000000000000000000000dEaD);
+    mapping (address => uint256)                    private _masterNonces;
+    mapping (address => mapping (uint256 => uint256)) private _permitNonces;
 
     mapping (address => uint256)                    public  balanceOf;
     mapping (address => mapping (address => uint))  public  allowance;
-    
-    mapping (address => uint256)                    private _masterNonces;
 
-    /// @dev Map of an address to a bitmap (slot => status)
-    mapping(address => mapping(uint256 => uint256)) private _unorderedNonces;
-
-    constructor() EIP712(NAME, "1") {}
+    constructor() EIP712(NAME, VERSION) {}
 
     /**
      * =================================================
@@ -66,42 +24,42 @@ contract WrappedNative is EIP712 {
         if (msg.value > 0) {
             deposit();
         } else {
-            if (msg.sig == 0xcab7e8eb) { // isNonceUsed(address account, uint256 nonce)
+            if (msg.sig == SELECTOR_IS_NONCE_USED) { // isNonceUsed(address account, uint256 nonce)
                 (address account, uint256 nonce) = abi.decode(msg.data[4:], (address,uint256));
-                bool isUsed = ((_unorderedNonces[account][uint248(nonce >> 8)] >> uint8(nonce)) & ONE) == ONE;
+                bool isUsed = ((_permitNonces[account][uint248(nonce >> 8)] >> uint8(nonce)) & ONE) == ONE;
                 assembly {
                     mstore(0x00, isUsed)
                     return(0x00, 0x20)
                 }
-            } else if (msg.sig == 0x45253c53) { // masterNonces(address account)
+            } else if (msg.sig == SELECTOR_MASTER_NONCES) { // masterNonces(address account)
                 assembly {
                     mstore(0x00, shr(0x60, shl(0x60, calldataload(0x04))))
                     mstore(0x20, _masterNonces.slot)
                     mstore(0x00, sload(keccak256(0x00, 0x40)))
                     return(0x00, 0x20)
                 }
-            } else if (msg.sig == 0x18160ddd) { // totalSupply()
+            } else if (msg.sig == SELECTOR_TOTAL_SUPPLY) { // totalSupply()
                 assembly {
                     mstore(0x00, selfbalance())
                     return(0x00, 0x20)
                 }
-            } else if (msg.sig == 0x78e890ba) { // domainSeparatorV4()
+            } else if (msg.sig == SELECTOR_DOMAIN_SEPARATOR_V4) { // domainSeparatorV4()
                 bytes32 domainSeparator = _domainSeparatorV4();
                 assembly {
                     mstore(0x00, domainSeparator)
                     return(0x00, 0x20)
                 }
-            } else if (msg.sig == 0x06fdde03) { // name()
+            } else if (msg.sig == SELECTOR_NAME) { // name()
                 bytes memory nameReturnValue = abi.encode(NAME);
                 assembly {
                     return(add(nameReturnValue, 0x20), mload(nameReturnValue))
                 }
-            } else if (msg.sig == 0x95d89b41) { // symbol()
+            } else if (msg.sig == SELECTOR_SYMBOL) { // symbol()
                 bytes memory symbolReturnValue = abi.encode(SYMBOL);
                 assembly {
                     return(add(symbolReturnValue, 0x20), mload(symbolReturnValue))
                 }
-            } else if (msg.sig == 0x313ce567) { // decimals()
+            } else if (msg.sig == SELECTOR_DECIMALS) { // decimals()
                 assembly {
                     mstore(0x00, 0x12) // 18
                     return(0x00, 0x20)
@@ -345,7 +303,7 @@ contract WrappedNative is EIP712 {
         }
 
         if (infrastructureFee > 0) {
-            _balanceTransfer(from, INFRASTRUCTURE_TAX_ADDRESS, infrastructureFee);
+            _balanceTransfer(from, ADDRESS_INFRASTRUCTURE_TAX, infrastructureFee);
         }
 
         _withdrawFromAccount(from, to, userAmount);
@@ -363,7 +321,7 @@ contract WrappedNative is EIP712 {
                 uint256 recoveryTaxAmount, 
                 uint256 mevAmount
             ) = _computeRecoverySplits(amount);
-            _balanceTransfer(from, INFRASTRUCTURE_TAX_ADDRESS, recoveryTaxAmount);
+            _balanceTransfer(from, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
             _balanceTransfer(from, to, mevAmount);
         } else {
             revert();
@@ -376,7 +334,7 @@ contract WrappedNative is EIP712 {
                 uint256 recoveryTaxAmount, 
                 uint256 mevAmount
             ) = _computeRecoverySplits(amount);
-            IRecoverTokens(token).transfer(INFRASTRUCTURE_TAX_ADDRESS, recoveryTaxAmount);
+            IRecoverTokens(token).transfer(ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
             IRecoverTokens(token).transfer(to, mevAmount);
         } else if (tokenStandard == 721) {
             IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId);
@@ -434,7 +392,7 @@ contract WrappedNative is EIP712 {
 
     function _checkAndInvalidateNonce(address account, uint256 nonce) private {
         unchecked {
-            if (uint256(_unorderedNonces[account][uint248(nonce >> 8)] ^= (ONE << uint8(nonce))) & 
+            if (uint256(_permitNonces[account][uint248(nonce >> 8)] ^= (ONE << uint8(nonce))) & 
                 (ONE << uint8(nonce)) == ZERO) {
                 revert();
             }
@@ -454,7 +412,7 @@ contract WrappedNative is EIP712 {
     function _computeRecoverySplits(
         uint256 amount
     ) private pure returns (uint256 recoveryTaxAmount, uint256 mevAmount) {
-        recoveryTaxAmount = amount * RECOVERY_TAX_BPS / FEE_DENOMINATOR;
+        recoveryTaxAmount = amount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
         mevAmount = amount - recoveryTaxAmount;
     }
 
@@ -465,7 +423,7 @@ contract WrappedNative is EIP712 {
     ) private pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
         if (convenienceFeeReceiver != address(0)) {
             convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
-            convenienceFeeInfrastructure = convenienceFee * CONVENIENCE_FEE_TAX_BPS / FEE_DENOMINATOR;
+            convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
         }
 
         convenienceFeeInfrastructure = Math.max(convenienceFeeInfrastructure, amount / FEE_DENOMINATOR);

@@ -18,9 +18,9 @@ interface IWrappedNative {
     function decimals() external view returns (uint8);
 
     // Wrapped Native Specific
-    event  Deposit(address indexed to, uint amount);
-    event  Withdrawal(address indexed from, uint amount);
+    event  Deposit(address indexed to, uint256 amount);
+    event  Withdrawal(address indexed from, uint256 amount);
 
     function deposit() external payable;
-    function withdraw(uint amount) external;
+    function withdraw(uint256 amount) external;
 }
