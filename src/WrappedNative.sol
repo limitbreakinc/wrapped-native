@@ -213,7 +213,6 @@ contract WrappedNative is EIP712 {
      * @dev    Throws when the `msg.sender`'s wrapped native token balance is less than the sum of `amounts` to withdraw.
      * @dev    Throws when the unwrapped native funds cannot be transferred to one or more of the receiver addresses.
      * @dev    Throws when the `toAddresses` and `amounts` arrays are not the same length.
-     * @dev    Throws when the `toAddresses` array is empty.
      *
      * @dev    <h4>Postconditions:</h4>
      * @dev    1. This contract's native token balance has decreased by the sum of `amounts`.
@@ -226,7 +225,7 @@ contract WrappedNative is EIP712 {
      * @param amounts  The amounts of wrapped native tokens to withdraw for each receiver address.
      */
     function withdrawSplit(address[] calldata toAddresses, uint256[] calldata amounts) external {
-        if (toAddresses.length != amounts.length || toAddresses.length == 0) {
+        if (toAddresses.length != amounts.length) {
             revert();
         }
 
