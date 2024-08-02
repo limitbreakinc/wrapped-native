@@ -779,7 +779,7 @@ contract WrappedNative is EIP712 {
         uint256 amount,
         address convenienceFeeReceiver,
         uint256 convenienceFeeBps
-    ) public pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
+    ) private pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
         if (convenienceFeeBps > FEE_DENOMINATOR) {
             revert();
         }
