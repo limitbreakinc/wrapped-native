@@ -779,22 +779,34 @@ contract WrappedNative is EIP712 {
         uint256 amount,
         address convenienceFeeReceiver,
         uint256 convenienceFeeBps
-    ) private pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
+    ) public pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
         if (convenienceFeeBps > FEE_DENOMINATOR) {
             revert();
         }
 
-        if (convenienceFeeReceiver != address(0)) {
-            convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
-            convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+        if (amount > type(uint240).max) {
+            revert();
         }
 
-        convenienceFeeInfrastructure = Math.max(convenienceFeeInfrastructure, amount / FEE_DENOMINATOR);
-        if (convenienceFee >= convenienceFeeInfrastructure) {
-            convenienceFee -= convenienceFeeInfrastructure;
+        if (convenienceFeeReceiver == address(0)) {
+            convenienceFeeBps = 0;
         }
 
-        userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
+        unchecked {
+            if (convenienceFeeBps > 9) {
+                convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
+                convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+                convenienceFee -= convenienceFeeInfrastructure;
+                userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
+            } else if (convenienceFeeBps > 0) {
+                convenienceFeeInfrastructure = amount / FEE_DENOMINATOR;
+                convenienceFee = amount * (convenienceFeeBps - ONE) / FEE_DENOMINATOR;
+                userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
+            } else {
+                convenienceFeeInfrastructure = amount / FEE_DENOMINATOR;
+                userAmount = amount - convenienceFeeInfrastructure;
+            }
+        }
     }
 
     //=================================================
