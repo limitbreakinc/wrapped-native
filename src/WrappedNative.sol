@@ -583,7 +583,7 @@ contract WrappedNative is EIP712 {
             uint256 infrastructureFee
         ) = _computeWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
 
-        if (convenienceFeeReceiver != address(0) && convenienceFee > 0) {
+        if (convenienceFee > 0) {
             _balanceTransfer(from, convenienceFeeReceiver, convenienceFee);
         }
 
@@ -780,6 +780,10 @@ contract WrappedNative is EIP712 {
         address convenienceFeeReceiver,
         uint256 convenienceFeeBps
     ) private pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
+        if (convenienceFeeBps > FEE_DENOMINATOR) {
+            revert();
+        }
+
         if (convenienceFeeReceiver != address(0)) {
             convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
             convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
