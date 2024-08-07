@@ -13,6 +13,11 @@ interface IWrappedNativeExtended is IWrappedNative {
     function withdrawSplit(address[] calldata toAddresses, uint256[] calldata amounts) external;
 
     // Permit Processing
+    function domainSeparatorV4() external view returns (bytes32);
+
+    function isNonceUsed(address account, uint256 nonce) external view returns (bool);
+    function masterNonces(address account) external view returns (uint256);
+
     function revokeMyOutstandingPermits() external;
     function revokeMyNonce(uint256 nonce) external;
 

@@ -1,0 +1,455 @@
+pragma solidity 0.8.26;
+
+import "./WrappedNative.t.sol";
+import "src/IWrappedNativeExtended.sol";
+
+import "test/mocks/ContractMockRejectsNative.sol";
+
+contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
+
+    //===========================================================
+    //== Deposit / Receive / Fallback Function Implementations ==
+    //===========================================================
+
+    function testRevertsWhenNoValueIsSentWithCalldataThatIsNotAnImplementedSelector(bytes4 selector, bytes memory argData) public {
+        selector = _sanitizeBadSelectorFallbackImplementation(selector);
+        selector = _sanitizeBadSelectorImplementedFunctions(selector);
+        vm.expectRevert();
+        address(weth).call{value: 0}(abi.encodeWithSelector(selector, argData));
+    }
+
+    function testReturnsUnsuccessfulWhenNoValueIsSentWithCalldataThatIsNotAnImplementedSelector(bytes4 selector, bytes memory argData) public {
+        selector = _sanitizeBadSelectorFallbackImplementation(selector);
+        selector = _sanitizeBadSelectorImplementedFunctions(selector);
+        (bool success, ) = address(weth).call{value: 0}(abi.encodeWithSelector(selector, argData));
+        assertFalse(success);
+    }
+
+    function testDepositSucceedsWhenValueIsSentWithoutCalldata(address depositor, uint256 amount) public {
+        amount = bound(amount, 1, type(uint256).max);
+        vm.deal(depositor, amount);
+        vm.prank(depositor);
+        vm.expectEmit(true, false, false, true);
+        emit Deposit(depositor, amount);
+        address(weth).call{value: amount}("");
+        assertEq(weth.balanceOf(depositor), amount);
+    }
+
+    function testDepositSucceedsWhenValueIsSentWithCalldata(bytes4 selector, bytes memory argData, address depositor, uint256 amount) public {
+        selector = _sanitizeBadSelectorImplementedFunctions(selector);
+        amount = bound(amount, 1, type(uint256).max);
+        vm.deal(depositor, amount);
+        vm.prank(depositor);
+        vm.expectEmit(true, false, false, true);
+        emit Deposit(depositor, amount);
+        address(weth).call{value: amount}(abi.encodeWithSelector(selector, argData));
+        assertEq(weth.balanceOf(depositor), amount);
+    }
+
+    function testDeposit(address depositor, uint256 amount) public {
+        vm.deal(depositor, amount);
+        vm.prank(depositor);
+        vm.expectEmit(true, false, false, true);
+        emit Deposit(depositor, amount);
+        weth.deposit{value: amount}();
+        assertEq(weth.balanceOf(depositor), amount);
+    }
+
+    function testDepositToWhereDepositorAddressIsNotToAddress(address depositor, address to, uint256 amount) public {
+        vm.assume(depositor != to);
+        vm.deal(depositor, amount);
+        vm.prank(depositor);
+        vm.expectEmit(true, false, false, true);
+        emit Deposit(to, amount);
+        IWrappedNativeExtended(address(weth)).depositTo{value: amount}(to);
+        assertEq(weth.balanceOf(to), amount);
+        assertEq(weth.balanceOf(depositor), 0);
+    }
+
+    function testFallbackImplementationOfIsNonceUsed(address account, uint256 nonce) public {
+        assertFalse(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_IS_NONCE_USED, account, nonce));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (bool)), false);
+
+        vm.prank(account);
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        (success, returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_IS_NONCE_USED, account, nonce));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (bool)), true);
+    }
+
+    function testFallbackImplementationOfMasterNonces(address account) public {
+        assertEq(IWrappedNativeExtended(address(weth)).masterNonces(account), 0);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_MASTER_NONCES, account));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (uint256)), 0);
+
+        vm.prank(account);
+        IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits();
+
+        assertEq(IWrappedNativeExtended(address(weth)).masterNonces(account), 1);
+        (success, returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_MASTER_NONCES, account));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (uint256)), 1);
+    }
+    
+    function testFallbackImplementationOfTotalSupply(uint256 supply) public {
+        vm.deal(address(this), supply);
+        weth.deposit{value: supply}();
+        assertEq(weth.totalSupply(), supply);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_TOTAL_SUPPLY));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (uint256)), supply);
+    }
+
+    function testFallbackImplementationOfDomainSeparatorV4() public {
+        bytes32 expectedDomainSeparator = 
+        keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"), 
+                keccak256(bytes(NAME)), 
+                keccak256(bytes(VERSION)), 
+                block.chainid, 
+                address(weth)
+            )
+        );
+
+        assertEq(IWrappedNativeExtended(address(weth)).domainSeparatorV4(), expectedDomainSeparator);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_DOMAIN_SEPARATOR_V4));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (bytes32)), expectedDomainSeparator);
+    }
+
+    function testFallbackImplementationOfName() public {
+        assertEq(weth.name(), NAME);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_NAME));
+        assertTrue(success);
+        assertEq(returndata.length, 96);
+        assertEq(abi.decode(returndata, (string)), NAME);
+    }
+
+    function testFallbackImplementationOfSymbol() public {
+        assertEq(weth.symbol(), SYMBOL);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_SYMBOL));
+        assertTrue(success);
+        assertEq(returndata.length, 96);
+        assertEq(abi.decode(returndata, (string)), SYMBOL);
+    }
+
+    function testFallbackImplementationOfDecimals() public {
+        assertEq(weth.decimals(), DECIMALS);
+        (bool success, bytes memory returndata) = address(weth).call(abi.encodeWithSelector(SELECTOR_DECIMALS));
+        assertTrue(success);
+        assertEq(returndata.length, 32);
+        assertEq(abi.decode(returndata, (uint8)), DECIMALS);
+    }
+
+    //=================================================
+    //===================== Withdrawals ===============
+    //=================================================
+
+    function testWithdrawUsingOwnAccount(address account, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        _sanitizeAddress(account, new address[](0));
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectEmit(true, false, false, true);
+        emit Withdrawal(account, withdrawalAmount);
+        weth.withdraw(withdrawalAmount);
+        assertEq(weth.balanceOf(account), depositedAmount - withdrawalAmount);
+        assertEq(account.balance, withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawUsingOwnAccountAfterReceivingWrappedToken(
+        address depositorAccount, 
+        address withdrawerAccount, 
+        uint256 depositedAmount, 
+        uint256 withdrawalAmount
+    ) public {
+        _sanitizeAddress(depositorAccount, new address[](0));
+        _sanitizeAddress(withdrawerAccount, new address[](0));
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(depositorAccount, depositedAmount);
+        vm.startPrank(depositorAccount);
+        weth.deposit{value: depositedAmount}();
+        weth.transfer(withdrawerAccount, depositedAmount);
+        vm.stopPrank();
+        vm.startPrank(withdrawerAccount);
+        vm.expectEmit(true, false, false, true);
+        emit Withdrawal(withdrawerAccount, withdrawalAmount);
+        weth.withdraw(withdrawalAmount);
+        assertEq(weth.balanceOf(withdrawerAccount), depositedAmount - withdrawalAmount);
+        assertEq(withdrawerAccount.balance, withdrawalAmount);
+        assertEq(weth.balanceOf(depositorAccount), 0);
+        vm.stopPrank();
+    }
+
+    function testWithdrawToOwnAccount(address account, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        _sanitizeAddress(account, new address[](0));
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectEmit(true, false, false, true);
+        emit Withdrawal(account, withdrawalAmount);
+        IWrappedNativeExtended(address(weth)).withdrawToAccount(account, withdrawalAmount);
+        assertEq(weth.balanceOf(account), depositedAmount - withdrawalAmount);
+        assertEq(account.balance, withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawToAnotherAccount(address account, address to, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        _sanitizeAddress(account, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(account != to);
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectEmit(true, false, false, true);
+        emit Withdrawal(account, withdrawalAmount);
+        IWrappedNativeExtended(address(weth)).withdrawToAccount(to, withdrawalAmount);
+        assertEq(weth.balanceOf(account), depositedAmount - withdrawalAmount);
+        assertEq(to.balance, withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawSplit(address depositorAccount, address[] memory toAddresses, uint256[] memory amounts, uint256 maxArraySize) public {
+        maxArraySize = bound(Math.min(10, maxArraySize), 0, Math.min(toAddresses.length, amounts.length));
+
+        assembly {
+            mstore(toAddresses, maxArraySize)
+            mstore(amounts, maxArraySize)
+        }
+
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < maxArraySize; ++i) {
+            _sanitizeAddress(toAddresses[i], new address[](0));
+            amounts[i] = bound(amounts[i], 0, type(uint128).max);
+            totalAmount += amounts[i];
+        }
+
+        uint256[] memory amountsForAccount = _aggregateAmountsByAddress(toAddresses, amounts);
+
+        _sanitizeAddress(depositorAccount, toAddresses);
+        vm.deal(depositorAccount, totalAmount);
+        vm.startPrank(depositorAccount);
+        weth.deposit{value: totalAmount}();
+        for (uint256 i = 0; i < toAddresses.length; ++i) {
+            vm.expectEmit(true, false, false, true);
+            emit Withdrawal(depositorAccount, amounts[i]);
+        }
+        IWrappedNativeExtended(address(weth)).withdrawSplit(toAddresses, amounts);
+        assertEq(weth.balanceOf(depositorAccount), 0);
+        for (uint256 i = 0; i < toAddresses.length; ++i) {
+            assertEq(toAddresses[i].balance, amountsForAccount[i]);
+        }
+        vm.stopPrank();
+    }
+
+    function testWithdrawRevertsOnOverdraft(address account, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        _sanitizeAddress(account, new address[](0));
+        depositedAmount = bound(depositedAmount, 0, type(uint256).max - 1);
+        withdrawalAmount = bound(withdrawalAmount, depositedAmount + 1, type(uint256).max);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectRevert();
+        weth.withdraw(withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawToRevertsOnOverdraft(address account, address to, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        _sanitizeAddress(account, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(account != to);
+        depositedAmount = bound(depositedAmount, 0, type(uint256).max - 1);
+        withdrawalAmount = bound(withdrawalAmount, depositedAmount + 1, type(uint256).max);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).withdrawToAccount(to, withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawSplitRevertsOnOverdraft(address account, address[] memory toAddresses, uint256[] memory amounts, uint256 maxArraySize) public {
+        maxArraySize = bound(Math.min(10, maxArraySize), 0, Math.min(toAddresses.length, amounts.length));
+
+        assembly {
+            mstore(toAddresses, maxArraySize)
+            mstore(amounts, maxArraySize)
+        }
+
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < maxArraySize; ++i) {
+            _sanitizeAddress(toAddresses[i], new address[](0));
+            amounts[i] = bound(amounts[i], 0, type(uint128).max);
+            totalAmount += amounts[i];
+        }
+
+        vm.assume(totalAmount > 0);
+
+        uint256[] memory amountsForAccount = _aggregateAmountsByAddress(toAddresses, amounts);
+
+        _sanitizeAddress(account, toAddresses);
+        vm.deal(account, totalAmount - 1);
+        vm.startPrank(account);
+        weth.deposit{value: totalAmount - 1}();
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).withdrawSplit(toAddresses, amounts);
+        vm.stopPrank();
+    }
+
+    function testWithdrawRevertsOnRejectedNativeTransfer(uint256 depositedAmount, uint256 withdrawalAmount) public {
+        address badReceiver = address(new ContractMockRejectsNative());
+        depositedAmount = bound(depositedAmount, 1, type(uint256).max);
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(badReceiver, depositedAmount);
+        vm.startPrank(badReceiver);
+        weth.deposit{value: depositedAmount}();
+        vm.expectRevert();
+        weth.withdraw(withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawToRevertsOnRjectedNativeTransfer(address account, uint256 depositedAmount, uint256 withdrawalAmount) public {
+        address badReceiver = address(new ContractMockRejectsNative());
+        _sanitizeAddress(account, new address[](0));
+        depositedAmount = bound(depositedAmount, 1, type(uint256).max);
+        withdrawalAmount = bound(withdrawalAmount, 0, depositedAmount);
+        vm.deal(account, depositedAmount);
+        vm.startPrank(account);
+        weth.deposit{value: depositedAmount}();
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).withdrawToAccount(badReceiver, withdrawalAmount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawSplitRevertsOnRejectedNativeTransfer(address account, address[] memory toAddresses, uint256[] memory amounts, uint256 maxArraySize) public {
+        address badReceiver = address(new ContractMockRejectsNative());
+        maxArraySize = bound(Math.min(10, maxArraySize), 0, Math.min(toAddresses.length, amounts.length));
+
+        assembly {
+            mstore(toAddresses, maxArraySize)
+            mstore(amounts, maxArraySize)
+        }
+
+        vm.assume(maxArraySize > 0);
+
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < maxArraySize; ++i) {
+            _sanitizeAddress(toAddresses[i], new address[](0));
+            amounts[i] = bound(amounts[i], 0, type(uint128).max);
+            totalAmount += amounts[i];
+        }
+
+        toAddresses[toAddresses.length - 1] = badReceiver;
+
+        vm.assume(totalAmount > 0);
+
+        uint256[] memory amountsForAccount = _aggregateAmountsByAddress(toAddresses, amounts);
+
+        vm.deal(account, totalAmount);
+        vm.startPrank(account);
+        weth.deposit{value: totalAmount}();
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).withdrawSplit(toAddresses, amounts);
+        vm.stopPrank();
+    }
+
+
+    //=================================================
+    //===================== Helpers ===================
+    //=================================================
+
+    function _sanitizeBadSelectorFallbackImplementation(bytes4 selector) private view returns (bytes4) {
+        if (selector == SELECTOR_IS_NONCE_USED ||
+            selector == SELECTOR_MASTER_NONCES ||
+            selector == SELECTOR_TOTAL_SUPPLY ||
+            selector == SELECTOR_DOMAIN_SEPARATOR_V4 ||
+            selector == SELECTOR_NAME ||
+            selector == SELECTOR_SYMBOL ||
+            selector == SELECTOR_DECIMALS) {
+            selector = bytes4(uint32(selector) + 1);
+        }
+        return selector;
+    }
+
+    function _sanitizeBadSelectorImplementedFunctions(bytes4 selector) private view returns (bytes4) {
+        if (selector == weth.balanceOf.selector ||
+            selector == weth.transfer.selector ||
+            selector == weth.allowance.selector ||
+            selector == weth.approve.selector ||
+            selector == weth.transferFrom.selector ||
+            selector == weth.deposit.selector ||
+            selector == weth.withdraw.selector ||
+            selector == IWrappedNativeExtended(address(weth)).depositTo.selector ||
+            selector == IWrappedNativeExtended(address(weth)).withdrawToAccount.selector ||
+            selector == IWrappedNativeExtended(address(weth)).withdrawSplit.selector ||
+            selector == IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits.selector ||
+            selector == IWrappedNativeExtended(address(weth)).revokeMyNonce.selector ||
+            selector == IWrappedNativeExtended(address(weth)).permitTransfer.selector ||
+            selector == IWrappedNativeExtended(address(weth)).doPermittedWithdraw.selector ||
+            selector == IWrappedNativeExtended(address(weth)).recoverStrandedWNative.selector ||
+            selector == IWrappedNativeExtended(address(weth)).recoverStrandedTokens.selector) {
+            selector = bytes4(uint32(selector) + 1);
+        }
+        return selector;
+    }
+
+    function _sanitizeAddress(address addr, address[] memory exclusionList) internal view {
+        vm.assume(uint160(addr) > 0xFF);
+        vm.assume(addr != address(0));
+        vm.assume(addr != address(0x000000000000000000636F6e736F6c652e6c6f67));
+        vm.assume(addr != address(0xDDc10602782af652bB913f7bdE1fD82981Db7dd9));
+        vm.assume(addr != address(weth));
+        vm.assume(addr.code.length == 0);
+
+        for (uint256 i = 0; i < exclusionList.length; ++i) {
+            vm.assume(addr != exclusionList[i]);
+        }
+    }
+
+    struct AddressAmount {
+        address account;
+        uint256 totalAmount;
+    }
+
+    function _aggregateAmountsByAddress(
+        address[] memory toAccounts, 
+        uint256[] memory amounts
+    ) 
+        public 
+        pure 
+        returns (uint256[] memory totalAmountsTo) 
+    {
+        require(toAccounts.length == amounts.length, "Input arrays must have the same length");
+
+        totalAmountsTo = new uint256[](toAccounts.length);
+
+        for (uint256 i = 0; i < toAccounts.length; i++) {
+            address account = toAccounts[i];
+            uint256 amount = amounts[i];
+
+            for (uint256 j = 0; j < toAccounts.length; j++) {
+                if (toAccounts[j] == account) {
+                    totalAmountsTo[i] += amounts[j];
+                }
+            }
+        }
+
+        return totalAmountsTo;
+    }
+}
