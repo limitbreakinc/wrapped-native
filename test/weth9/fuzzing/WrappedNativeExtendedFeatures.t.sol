@@ -2,10 +2,16 @@ pragma solidity 0.8.26;
 
 import "./WrappedNative.t.sol";
 import "src/IWrappedNativeExtended.sol";
+import "src/utils/MessageHashUtils.sol";
 
 import "test/mocks/ContractMockRejectsNative.sol";
+import "test/mocks/ERC20Mock.sol";
+import "test/mocks/ERC721Mock.sol";
+import "test/mocks/ERC1155Mock.sol";
 
 contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
+    event PermitNonceInvalidated(address indexed account,uint256 indexed nonce);
+    event MasterNonceInvalidated(address indexed account, uint256 indexed nonce);
 
     //===========================================================
     //== Deposit / Receive / Fallback Function Implementations ==
@@ -369,6 +375,1142 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
         vm.stopPrank();
     }
 
+    //=================================================
+    //======= Permitted Transfers / Withdrawals =======
+    //=================================================
+
+    function testRevokeMyOutstandingPermits(address account) public {
+        _sanitizeAddress(account, new address[](0));
+        for (uint256 i = 0; i < 10; i++) {
+            uint256 previousMasterNonce = IWrappedNativeExtended(address(weth)).masterNonces(account);
+            vm.expectEmit(true, true, false, false);
+            emit MasterNonceInvalidated(account, previousMasterNonce);
+            vm.prank(account);
+            IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits();
+            uint256 updatedMasterNonce = IWrappedNativeExtended(address(weth)).masterNonces(account);
+            assertEq(updatedMasterNonce - previousMasterNonce, 1);
+        }
+    }
+
+    function testRevokeMyNonce(address account, uint256 nonce) public {
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        _sanitizeAddress(account, new address[](0));
+        vm.prank(account);
+        vm.expectEmit(true, true, false, false);
+        emit PermitNonceInvalidated(account, nonce);
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+    }
+
+    function testRevokeConsecutiveNonces(address account) public {
+        _sanitizeAddress(account, new address[](0));
+
+        vm.startPrank(account);
+        for (uint256 nonce = 0; nonce < 512; nonce++) {
+            vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+            vm.expectEmit(true, true, false, false);
+            emit PermitNonceInvalidated(account, nonce);
+            IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+            assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        }
+
+        for (uint256 nonce = type(uint256).max - 512; nonce < type(uint256).max; nonce++) {
+            vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+            vm.expectEmit(true, true, false, false);
+            emit PermitNonceInvalidated(account, nonce);
+            IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+            assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        }
+        vm.stopPrank();
+    }
+
+    function testRevokeMyNonceRevertsWhenNonceIsAlreadyUsed(address account, uint256 nonce) public {
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        _sanitizeAddress(account, new address[](0));
+        vm.startPrank(account);
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(account, nonce));
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+        vm.stopPrank();
+    }
+
+    function testPermitTransferNoAutoDeposit(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.prank(from);
+        weth.deposit{value: permitAmount}();
+
+        vm.prank(operator);
+        vm.expectEmit(true, true, false, false);
+        emit PermitNonceInvalidated(from, nonce);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(from, to, transferAmount);
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+
+        if (from != to) {
+            assertEq(weth.balanceOf(from), permitAmount - transferAmount);
+            assertEq(weth.balanceOf(to), transferAmount);
+        } else {
+            assertEq(weth.balanceOf(from), permitAmount);
+        }
+
+        assertEq(operator.balance, 0);
+        assertEq(from.balance, 0);
+        assertEq(to.balance, 0);
+
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+    }
+
+    function testPermitTransferWithAutoDeposit(uint160 fromKey, address operator, address to, uint256 autodepositAmount, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        autodepositAmount = bound(autodepositAmount, 0, permitAmount);
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount - autodepositAmount);
+        vm.deal(operator, autodepositAmount);
+        vm.prank(from);
+        weth.deposit{value: permitAmount - autodepositAmount}();
+
+        vm.prank(operator);
+        if (autodepositAmount > 0) {
+            vm.expectEmit(true, false, false, true);
+            emit Deposit(from, autodepositAmount);
+        }
+        vm.expectEmit(true, true, false, false);
+        emit PermitNonceInvalidated(from, nonce);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(from, to, transferAmount);
+        IWrappedNativeExtended(address(weth)).permitTransfer{value: autodepositAmount}(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+
+        if (from != to) {
+            assertEq(weth.balanceOf(from), permitAmount - transferAmount);
+            assertEq(weth.balanceOf(to), transferAmount);
+        } else {
+            assertEq(weth.balanceOf(from), permitAmount);
+        }
+
+        assertEq(operator.balance, 0);
+        assertEq(from.balance, 0);
+        assertEq(to.balance, 0);
+
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+    }
+
+    function testPermitTransferRevertsWhenBalanceIsInsufficient(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration, uint256 shortfall) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        permitAmount = bound(permitAmount, 1, type(uint256).max);
+        transferAmount = bound(transferAmount, 1, permitAmount);
+        shortfall = bound(shortfall, 0, transferAmount - 1);
+        if (shortfall == 0) {
+            shortfall = 1;
+        }
+        uint256 depositAmount = transferAmount - shortfall;
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, depositAmount);
+        vm.prank(from);
+        weth.deposit{value: depositAmount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenTransferAmountExceedsPermittedAmount(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        permitAmount = bound(permitAmount, 0, type(uint256).max - 1);
+        transferAmount = bound(transferAmount, permitAmount + 1, type(uint256).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.prank(from);
+        weth.deposit{value: permitAmount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenPermitIsExpired(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration, uint256 secondsPastExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        permitAmount = bound(permitAmount, 0, type(uint256).max);
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - 1 - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+        uint256 pastExpiration = bound(secondsPastExpiration, 1, type(uint256).max - expiration);
+        vm.warp(expiration + pastExpiration);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.prank(from);
+        weth.deposit{value: permitAmount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenFromIsZero(address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        address from = address(0);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(1000, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.prank(from);
+        weth.deposit{value: permitAmount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenNonceIsUsed(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.startPrank(from);
+        weth.deposit{value: permitAmount}();
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+        vm.stopPrank();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenMasterNonceIsRevoked(uint160 fromKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.startPrank(from);
+        weth.deposit{value: permitAmount}();
+        IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits();
+        vm.stopPrank();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testPermitTransferRevertsWhenPermitNotSignedByFromAccount(uint160 fromKey, uint160 signerKey, address operator, address to, uint256 transferAmount, uint256 permitAmount, uint256 nonce, uint256 secondsToExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        signerKey = uint160(bound(signerKey, 2048, type(uint160).max));
+        vm.assume(fromKey != signerKey);
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        transferAmount = bound(transferAmount, 0, permitAmount);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_TRANSFER_TYPEHASH,
+                        operator,
+                        permitAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from)
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, permitAmount);
+        vm.startPrank(from);
+        weth.deposit{value: permitAmount}();
+        vm.stopPrank();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).permitTransfer(
+            from, 
+            to, 
+            transferAmount, 
+            permitAmount, 
+            nonce, 
+            expiration, 
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawal(uint160 fromKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.prank(from);
+        weth.deposit{value: amount}();
+
+        vm.prank(operator);
+
+        vm.expectEmit(true, true, false, false);
+        emit PermitNonceInvalidated(from, nonce);
+
+        if (convenienceFee > 0) {
+            vm.expectEmit(true, true, false, true);
+            emit Transfer(from, convenienceFeeReceiver, convenienceFee);
+        }
+
+        if (convenienceFeeInfrastructure > 0) {
+            vm.expectEmit(true, true, false, true);
+            emit Transfer(from, ADDRESS_INFRASTRUCTURE_TAX, convenienceFeeInfrastructure);
+        }
+
+        vm.expectEmit(true, false, false, true);
+        emit Withdrawal(from, userAmount);
+
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+
+        assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+
+        assertEq(to.balance, userAmount);
+        assertEq(weth.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), convenienceFeeInfrastructure);
+        if (convenienceFeeReceiver != address(0)) {
+            assertEq(weth.balanceOf(convenienceFeeReceiver), convenienceFee);
+        }
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenBalanceIsInsufficient(uint160 fromKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps, uint256 shortfall) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 1, type(uint240).max);
+        shortfall = bound(shortfall, 0, amount - 1);
+        if (shortfall == 0) {
+            shortfall = 1;
+        }
+        uint256 depositAmount = amount - shortfall;
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, depositAmount);
+        vm.prank(from);
+        weth.deposit{value: depositAmount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenAmountExceedsPermit(uint160 fromKey, address operator, address to, uint256 amount, uint256 permittedAmount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        permittedAmount = bound(permittedAmount, 0, type(uint240).max - 1);
+        amount = bound(amount, permittedAmount + 1, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        permittedAmount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.prank(from);
+        weth.deposit{value: amount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenPermitIsExpired(uint160 fromKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps, uint256 secondsPastExpiration) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - 1 - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+        uint256 pastExpiration = bound(secondsPastExpiration, 1, type(uint256).max - expiration);
+        vm.warp(expiration + pastExpiration);
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.prank(from);
+        weth.deposit{value: amount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenFromIsZero(address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        address from = address(0);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(1000, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.prank(from);
+        weth.deposit{value: amount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenNonceIsUsed(uint160 fromKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.startPrank(from);
+        weth.deposit{value: amount}();
+        IWrappedNativeExtended(address(weth)).revokeMyNonce(nonce);
+        vm.stopPrank();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenMasterNonceIsRevoked(uint160 fromKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(fromKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.startPrank(from);
+        weth.deposit{value: amount}();
+        IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits();
+        vm.stopPrank();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    function testDoPermittedWithdrawalRevertsWhenPermitNotSignedByFromAccount(uint160 fromKey, uint160 signerKey, address operator, address to, uint256 amount, uint256 nonce, uint256 secondsToExpiration, address convenienceFeeReceiver, uint256 convenienceFeeBps) public {
+        fromKey = uint160(bound(fromKey, 2048, type(uint160).max));
+        signerKey = uint160(bound(signerKey, 2048, type(uint160).max));
+        vm.assume(fromKey != signerKey);
+        address from = vm.addr(fromKey);
+        _sanitizeAddress(operator, new address[](0));
+        _sanitizeAddress(from, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+        vm.assume(to != convenienceFeeReceiver);
+        convenienceFeeBps = bound(convenienceFeeBps, 0, FEE_DENOMINATOR);
+        amount = bound(amount, 0, type(uint240).max);
+        vm.assume(!IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
+        secondsToExpiration = bound(secondsToExpiration, 0, type(uint256).max - block.timestamp);
+        uint256 expiration = block.timestamp + secondsToExpiration;
+
+        (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) = 
+            _computeExpectedWithdrawalSplits(amount, convenienceFeeReceiver, convenienceFeeBps);
+
+        bytes32 domainSeparator = IWrappedNativeExtended(address(weth)).domainSeparatorV4();
+        bytes32 digest = 
+            MessageHashUtils.toTypedDataHash(
+                IWrappedNativeExtended(address(weth)).domainSeparatorV4(), 
+                keccak256(
+                    abi.encode(
+                        PERMIT_WITHDRAWAL_TYPEHASH,
+                        operator,
+                        amount,
+                        nonce,
+                        expiration,
+                        IWrappedNativeExtended(address(weth)).masterNonces(from),
+                        to,
+                        convenienceFeeReceiver,
+                        convenienceFeeBps
+                    )
+                )
+            );
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        bytes memory signedPermit = abi.encodePacked(r, s, uint8(v));
+
+        vm.deal(from, amount);
+        vm.prank(from);
+        weth.deposit{value: amount}();
+
+        vm.prank(operator);
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).doPermittedWithdraw(
+            from, 
+            to, 
+            amount, 
+            nonce, 
+            expiration, 
+            convenienceFeeReceiver,
+            convenienceFeeBps,
+            signedPermit
+        );
+    }
+
+    //=================================================
+    //=============== Recovery Functions ==============
+    //=================================================
+
+    function testRecoverStrandedWNativeFromZeroAddress(address mev, address to, uint256 amount) public {
+        _sanitizeAddress(mev, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+
+        amount = bound(amount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
+
+        uint256 recoveryTaxAmount = amount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+        uint256 mevAmount = amount - recoveryTaxAmount;
+
+        vm.deal(address(this), amount);
+        IWrappedNativeExtended(address(weth)).depositTo{value: amount}(ADDRESS_ZERO);
+        
+        vm.prank(mev);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(ADDRESS_ZERO, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(ADDRESS_ZERO, to, mevAmount);
+        IWrappedNativeExtended(address(weth)).recoverWNativeFromZeroAddress(to, amount);
+
+        assertEq(weth.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
+        assertEq(weth.balanceOf(to), mevAmount);
+    }
+
+    function testRecoverStrandedTokensWNative(address mev, address to, uint256 tokenId, uint256 recoverAmount, uint256 strandedAmount) public {
+        strandedAmount = bound(strandedAmount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
+        recoverAmount = bound(recoverAmount, 0, strandedAmount);
+
+        uint256 recoveryTaxAmount = recoverAmount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+        uint256 mevAmount = recoverAmount - recoveryTaxAmount;
+
+        _sanitizeAddress(mev, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+
+        vm.deal(address(this), strandedAmount);
+        IWrappedNativeExtended(address(weth)).depositTo{value: strandedAmount}(address(weth));
+
+        vm.prank(mev);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(address(weth), ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(address(weth), to, mevAmount);
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(weth), to, tokenId, recoverAmount);
+
+        assertEq(weth.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
+        assertEq(weth.balanceOf(to), mevAmount);
+    }
+
+    function testRecoverStrandedTokensERC20(address mev, address to, uint256 tokenId, uint256 recoverAmount, uint256 strandedAmount) public {
+        ERC20Mock coin = new ERC20Mock("Coin", "COIN", 18);
+
+        strandedAmount = bound(strandedAmount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
+        recoverAmount = bound(recoverAmount, 0, strandedAmount);
+
+        uint256 recoveryTaxAmount = recoverAmount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+        uint256 mevAmount = recoverAmount - recoveryTaxAmount;
+
+        _sanitizeAddress(mev, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+
+        coin.mint(address(weth), strandedAmount);
+
+        vm.prank(mev);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(address(weth), ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
+        vm.expectEmit(true, true, false, true);
+        emit Transfer(address(weth), to, mevAmount);
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(coin), to, tokenId, recoverAmount);
+
+        assertEq(coin.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
+        assertEq(coin.balanceOf(to), mevAmount);
+    }
+
+    function testRecoverStrandedTokensERC721(address mev, address to, uint256 tokenId, uint256 amount) public {
+        ERC721Mock token = new ERC721Mock();
+
+        _sanitizeAddress(mev, new address[](0));
+        _sanitizeAddress(to, new address[](0));
+
+        token.mint(address(weth), tokenId);
+        
+        vm.prank(mev);
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(token), to, tokenId, amount);
+
+        assertTrue(token.ownerOf(tokenId) == to);
+    }
+
+    function testRecoverStrandedTokensRevertsWhenTokenStandardIsInvalid(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) public {
+        if (tokenStandard == TOKEN_STANDARD_ERC20 || tokenStandard == TOKEN_STANDARD_ERC721) {
+            ++tokenStandard;
+        }
+
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(tokenStandard, token, to, tokenId, amount);
+    }
+
+    function testRecoverStrandedTokensRevertsWhenTokenStandardIsValidAndTokenIsZero(address mev, address to, uint256 tokenId, uint256 amount) public {
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(0), to, tokenId, amount);
+
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(0), to, tokenId, amount);
+    }
+
+    function testRecoverStrandedTokensRevertsWhenExpectedTransferFunctionIsNotImplemented(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) public {
+        ContractMockRejectsNative token = new ContractMockRejectsNative();
+
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(token), to, tokenId, amount);
+
+        vm.expectRevert();
+        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(token), to, tokenId, amount);
+    }
 
     //=================================================
     //===================== Helpers ===================
@@ -402,7 +1544,7 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
             selector == IWrappedNativeExtended(address(weth)).revokeMyNonce.selector ||
             selector == IWrappedNativeExtended(address(weth)).permitTransfer.selector ||
             selector == IWrappedNativeExtended(address(weth)).doPermittedWithdraw.selector ||
-            selector == IWrappedNativeExtended(address(weth)).recoverStrandedWNative.selector ||
+            selector == IWrappedNativeExtended(address(weth)).recoverWNativeFromZeroAddress.selector ||
             selector == IWrappedNativeExtended(address(weth)).recoverStrandedTokens.selector) {
             selector = bytes4(uint32(selector) + 1);
         }
@@ -412,6 +1554,7 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
     function _sanitizeAddress(address addr, address[] memory exclusionList) internal view {
         vm.assume(uint160(addr) > 0xFF);
         vm.assume(addr != address(0));
+        vm.assume(addr != ADDRESS_INFRASTRUCTURE_TAX);
         vm.assume(addr != address(0x000000000000000000636F6e736F6c652e6c6f67));
         vm.assume(addr != address(0xDDc10602782af652bB913f7bdE1fD82981Db7dd9));
         vm.assume(addr != address(weth));
@@ -451,5 +1594,32 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
         }
 
         return totalAmountsTo;
+    }
+
+    function _computeExpectedWithdrawalSplits(
+        uint256 amount,
+        address convenienceFeeReceiver,
+        uint256 convenienceFeeBps
+    ) private pure returns (uint256 userAmount, uint256 convenienceFee, uint256 convenienceFeeInfrastructure) {
+        
+        if (convenienceFeeReceiver == address(0)) {
+            convenienceFeeBps = 0;
+        }
+
+        unchecked {
+            if (convenienceFeeBps > 9) {
+                convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
+                convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
+                convenienceFee -= convenienceFeeInfrastructure;
+                userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
+            } else if (convenienceFeeBps > 0) {
+                convenienceFeeInfrastructure = amount / FEE_DENOMINATOR;
+                convenienceFee = amount * (convenienceFeeBps - ONE) / FEE_DENOMINATOR;
+                userAmount = amount - convenienceFee - convenienceFeeInfrastructure;
+            } else {
+                convenienceFeeInfrastructure = amount / FEE_DENOMINATOR;
+                userAmount = amount - convenienceFeeInfrastructure;
+            }
+        }
     }
 }

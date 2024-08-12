@@ -29,7 +29,7 @@ interface IWrappedNativeExtended is IWrappedNative {
         uint256 nonce,
         uint256 expiration,
         bytes calldata signedPermit
-    ) external;
+    ) external payable;
 
     function doPermittedWithdraw(
         address from,
@@ -43,7 +43,7 @@ interface IWrappedNativeExtended is IWrappedNative {
     ) external;
 
     // MEV-Based Asset Recovery
-    function recoverStrandedWNative(address from, address to, uint256 amount) external;
+    function recoverWNativeFromZeroAddress(address to, uint256 amount) external;
     function recoverStrandedTokens(
         uint256 tokenStandard, 
         address token, 

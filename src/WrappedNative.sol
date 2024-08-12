@@ -453,8 +453,10 @@ contract WrappedNative is EIP712 {
      * @dev    2. When `msg.value` is greater than zero, the `msg.sender`'s native token balance has decreased by `msg.value`.
      * @dev    3. When `msg.value` is greater than zero, the `from` account's wrapped native token balance has increased by `msg.value`.
      * @dev    4. When `msg.value` is greater than zero, a `Deposit` event has been emitted.  The `from` address is logged in the event.
-     * @dev    5. The `transferAmount` of wrapped native tokens has been transferred from the `from` account to the `to` account.
-     * @dev    6. A `Transfer` event has been emitted.  The `from` address, `to` address, and `transferAmount` are logged in the event.
+     * @dev    5. `nonce` for `from` account is invalidated.
+     * @dev    6. A `PermitNonceInvalidated` event has been emitted.
+     * @dev    7. The `transferAmount` of wrapped native tokens has been transferred from the `from` account to the `to` account.
+     * @dev    8. A `Transfer` event has been emitted.  The `from` address, `to` address, and `transferAmount` are logged in the event.
      *
      * @param from  The address that transfers the wrapped native tokens.
      * @param to    The address that receives the wrapped native tokens.
@@ -529,7 +531,9 @@ contract WrappedNative is EIP712 {
      * @dev    3. The `to` account's native token balance has increased by `amount`, less convenience and/or infrastructure fees.
      * @dev    4. The `convenienceFeeReceiver` account's wrapped native token balance has increased by the convenience fee.
      * @dev    5. The infrastructure tax account's wrapped native token balance has increased by the infrastructure fee.
-     * @dev    6. A `Withdrawal` event has been emitted.  Caveat: The `from` address is logged in the event, not `to` or `msg.sender`.
+     * @dev    6. `nonce` for `from` account is invalidated.
+     * @dev    7. A `PermitNonceInvalidated` event has been emitted.
+     * @dev    8. A `Withdrawal` event has been emitted.  Caveat: The `from` address is logged in the event, not `to` or `msg.sender`.
      *
      * @param from  The address that from which funds are withdrawn.
      * @param to  The address that receives the withdrawn funds.
@@ -603,7 +607,6 @@ contract WrappedNative is EIP712 {
      *         Wrapped native tokens are occasionally sent to the zero address by mistake, and this function
      *         allows the stranded funds to be recovered through a MEV transaction.
      *
-     * @dev    Throws when the `from` address is not the zero address.
      * @dev    Throws when the wrapped native token balance of the zero address is less than `amount`.
      *
      * @dev    <h4>Postconditions:</h4>
@@ -611,21 +614,17 @@ contract WrappedNative is EIP712 {
      * @dev    2. The `to` account's wrapped native token balance has increased by `amount`, less recovery taxes.
      * @dev    3. The infrastructure tax account's wrapped native token balance has increased by the recovery tax.
      *
-     * @param from  Must be the zero address.
      * @param to  The address that receives the stranded wrapped native tokens.
      * @param amount  The amount of wrapped native tokens to recover.
      */
-    function recoverStrandedWNative(address from, address to, uint256 amount) external {
-        if (from == ADDRESS_ZERO) {
-            (
-                uint256 recoveryTaxAmount, 
-                uint256 mevAmount
-            ) = _computeRecoverySplits(amount);
-            _balanceTransfer(from, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-            _balanceTransfer(from, to, mevAmount);
-        } else {
-            revert();
-        }
+    function recoverWNativeFromZeroAddress(address to, uint256 amount) external {
+        (
+            uint256 recoveryTaxAmount, 
+            uint256 mevAmount
+        ) = _computeRecoverySplits(amount);
+
+        _balanceTransfer(ADDRESS_ZERO, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
+        _balanceTransfer(ADDRESS_ZERO, to, mevAmount);
     }
 
     /**
@@ -662,8 +661,6 @@ contract WrappedNative is EIP712 {
             IRecoverTokens(token).transfer(to, mevAmount);
         } else if (tokenStandard == TOKEN_STANDARD_ERC721) {
             IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId);
-        } else if (tokenStandard == TOKEN_STANDARD_ERC1155) {
-            IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId, amount, "");
         } else {
             revert();
         }
