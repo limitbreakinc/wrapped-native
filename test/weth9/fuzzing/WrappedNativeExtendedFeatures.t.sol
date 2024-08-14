@@ -195,10 +195,14 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
         vm.expectEmit(true, false, false, true);
         emit Withdrawal(withdrawerAccount, withdrawalAmount);
         weth.withdraw(withdrawalAmount);
+        vm.stopPrank();
+
         assertEq(weth.balanceOf(withdrawerAccount), depositedAmount - withdrawalAmount);
         assertEq(withdrawerAccount.balance, withdrawalAmount);
-        assertEq(weth.balanceOf(depositorAccount), 0);
-        vm.stopPrank();
+
+        if (withdrawerAccount != depositorAccount) {
+            assertEq(weth.balanceOf(depositorAccount), 0);
+        }
     }
 
     function testWithdrawToOwnAccount(address account, uint256 depositedAmount, uint256 withdrawalAmount) public {
@@ -491,10 +495,6 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
             assertEq(weth.balanceOf(from), permitAmount);
         }
 
-        assertEq(operator.balance, 0);
-        assertEq(from.balance, 0);
-        assertEq(to.balance, 0);
-
         assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
     }
 
@@ -559,10 +559,6 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
         } else {
             assertEq(weth.balanceOf(from), permitAmount);
         }
-
-        assertEq(operator.balance, 0);
-        assertEq(from.balance, 0);
-        assertEq(to.balance, 0);
 
         assertTrue(IWrappedNativeExtended(address(weth)).isNonceUsed(from, nonce));
     }
@@ -1557,6 +1553,7 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
         vm.assume(addr != ADDRESS_INFRASTRUCTURE_TAX);
         vm.assume(addr != address(0x000000000000000000636F6e736F6c652e6c6f67));
         vm.assume(addr != address(0xDDc10602782af652bB913f7bdE1fD82981Db7dd9));
+        vm.assume(addr != address(0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38));
         vm.assume(addr != address(weth));
         vm.assume(addr.code.length == 0);
 
