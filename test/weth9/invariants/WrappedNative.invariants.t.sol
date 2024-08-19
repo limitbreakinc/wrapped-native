@@ -3,7 +3,7 @@ pragma solidity 0.8.25;
 
 import "forge-std/Test.sol";
 import "src/WrappedNative.sol";
-import "src/IWrappedNativeExtended.sol";
+import "src/interfaces/IWrappedNativeExtended.sol";
 import "./WrappedNativeHandler.sol";
 
 contract WrappedNativeInvariants is Test {

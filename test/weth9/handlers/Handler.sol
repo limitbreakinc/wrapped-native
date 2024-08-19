@@ -6,7 +6,7 @@ import "forge-std/StdCheats.sol";
 import "forge-std/StdUtils.sol";
 import "forge-std/console.sol";
 import "../helpers/AddressSet.sol";
-import "src/IWrappedNative.sol";
+import "src/interfaces/IWrappedNative.sol";
 
 uint256 constant ETH_SUPPLY = 120_500_000 ether;
 

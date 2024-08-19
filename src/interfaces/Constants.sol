@@ -17,22 +17,11 @@ uint256 constant TOKEN_STANDARD_ERC721 = 721;
 address constant ADDRESS_ZERO = address(0x0000000000000000000000000000000000000000);
 address constant ADDRESS_INFRASTRUCTURE_TAX = address(0x0); // TODO
 
-// uint256(keccak256("Withdrawal(address,uint256)"));
 uint256 constant WITHDRAWAL_EVENT_TOPIC_0 = 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65;
-
-// uint256(keccak256("Deposit(address,uint256)"));
 uint256 constant DEPOSIT_EVENT_TOPIC_0 = 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c;
-
-// uint256(keccak256("Approval(address,address,uint256)"));
 uint256 constant APPROVAL_EVENT_TOPIC_0 = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
-
-// uint256(keccak256("Transfer(address,address,uint256)"));
 uint256 constant TRANSFER_EVENT_TOPIC_0 = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
-
-// uint256(keccak256("PermitNonceInvalidated(address,uint256)"));
 uint256 constant PERMIT_NONCE_INVALIDATED_EVENT_TOPIC_0 = 0x8dc5a0b2e80f26187d38744e9559150e3bd6e06fccefbe737fd33411cfb15151;
-
-// uint256(keccak256("MasterNonceInvalidated(address,uint256)"));
 uint256 constant MASTER_NONCE_INVALIDATED_EVENT_TOPIC_0 = 0x9614574d6542397172c19ba2bf4588434feeb977576e92b7b59b38242ab59609;
 
 bytes32 constant PERMIT_TRANSFER_TYPEHASH =

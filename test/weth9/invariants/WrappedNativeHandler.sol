@@ -6,8 +6,8 @@ import "forge-std/StdCheats.sol";
 import "forge-std/StdUtils.sol";
 import "forge-std/console.sol";
 import "./AddressSet.sol";
-import "src/IWrappedNativeExtended.sol";
-import "src/Constants.sol";
+import "src/interfaces/IWrappedNativeExtended.sol";
+import "src/interfaces/Constants.sol";
 import "src/utils/MessageHashUtils.sol";
 
 uint256 constant ETH_SUPPLY = 120_500_000 ether;

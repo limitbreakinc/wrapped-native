@@ -1,7 +1,7 @@
 pragma solidity 0.8.25;
 
 import "./WrappedNative.t.sol";
-import "src/IWrappedNativeExtended.sol";
+import "src/interfaces/IWrappedNativeExtended.sol";
 import "src/utils/MessageHashUtils.sol";
 
 import "test/mocks/ContractMockRejectsNative.sol";

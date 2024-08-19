@@ -1,7 +1,7 @@
 pragma solidity 0.8.25;
 
-import "./Constants.sol";
-import "./IRecoverTokens.sol";
+import "./interfaces/Constants.sol";
+import "./interfaces/IRecoverTokens.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 

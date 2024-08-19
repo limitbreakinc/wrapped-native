@@ -2,7 +2,7 @@
 pragma solidity 0.8.25;
 
 import "forge-std/Test.sol";
-import "src/IWrappedNative.sol";
+import "src/interfaces/IWrappedNative.sol";
 
 abstract contract WNativeBaseTest is Test {
     event  Approval(address indexed src, address indexed guy, uint256 wad);
