@@ -136,3 +136,6 @@ forge-cache/
 cache/
 
 docs/
+broadcast/
+
+.env.secrets
