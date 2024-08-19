@@ -1,4 +1,4 @@
-pragma solidity 0.8.26;
+pragma solidity 0.8.25;
 
 string constant VERSION = "1";
 string constant NAME = "Wrapped Native";

@@ -8,8 +8,8 @@ cache_path  = 'forge-cache'
 gas_reports = ["*"]
 
 
-solc_version = "0.8.26"
-evm_version = 'london'
+solc_version = "0.8.25"
+evm_version = 'cancun'
 via_ir = true
 
 optimizer = true

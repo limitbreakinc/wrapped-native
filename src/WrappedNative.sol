@@ -1,4 +1,4 @@
-pragma solidity 0.8.26;
+pragma solidity 0.8.25;
 
 import "./Constants.sol";
 import "./IRecoverTokens.sol";
