@@ -44,7 +44,7 @@ if [ -z "$GAS_PRICE" ] || [ -z "$PRIORITY_GAS_PRICE" ]; then
 fi
 
 echo ""
-echo "============= DEPLOYING SETTINGS REGISTRY ============="
+echo "============= DEPLOYING WRAPPED NATIVE ============="
 
 echo "Gas Price (wei): $GAS_PRICE"
 echo "Priority Gas Price (wei): $PRIORITY_GAS_PRICE"
