@@ -1,4 +1,4 @@
-pragma solidity 0.8.26;
+pragma solidity 0.8.25;
 
 interface IRecoverTokens {
     function transfer(address /*_to*/, uint256 /*_value*/) external returns (bool);
