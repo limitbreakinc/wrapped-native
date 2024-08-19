@@ -3,7 +3,6 @@
 
 pragma solidity ^0.8.20;
 
-import "./ECDSA.sol";
 import "./MessageHashUtils.sol";
 
 /**
