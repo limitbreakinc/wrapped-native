@@ -1,4 +1,5 @@
-pragma solidity 0.8.25;
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
 
 string constant VERSION = "1";
 string constant NAME = "Wrapped Native";
