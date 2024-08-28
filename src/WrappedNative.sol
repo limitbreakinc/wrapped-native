@@ -2,7 +2,6 @@
 pragma solidity 0.8.24;
 
 import "./interfaces/Constants.sol";
-import "./interfaces/IRecoverTokens.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 
@@ -25,8 +24,6 @@ import "./utils/Math.sol";
  * @notice - **Permit Functions** - allows for transfers and withdrawals to be approved to spenders/operators gaslessly using EIP-712 signatures.
  *           Permitted withdrawals allow gas sponsorship to unwrap wrapped native tokens on the user's behalf, for a small convenience fee specified by the app.
  *           This is useful when user has no native tokens on a new chain but they have received wrapped native tokens.
- * @notice - **Lost Token Recovery** - allows anyone to recover ERC20/721/1155 tokens that were accidentally sent to this contract.
- * @notice - **Lost Wrapped Native Recovery** - allows anyone to recover wrapped native tokens that were accidentally sent to the zero address that would be otherwise lost.
  */
 
 contract WrappedNative is EIP712 {
@@ -600,74 +597,6 @@ contract WrappedNative is EIP712 {
     }
 
     //=================================================
-    //============ MEV-Based Asset Recovery ===========
-    //=================================================
-
-    /**
-     * @notice Recovers stranded wrapped native tokens from the zero address to the `to` address.
-     *         Wrapped native tokens are occasionally sent to the zero address by mistake, and this function
-     *         allows the stranded funds to be recovered through a MEV transaction.
-     *
-     * @dev    Throws when the wrapped native token balance of the zero address is less than `amount`.
-     *
-     * @dev    <h4>Postconditions:</h4>
-     * @dev    1. The zero address's wrapped native token balance has decreased by `amount`.
-     * @dev    2. The `to` account's wrapped native token balance has increased by `amount`, less recovery taxes.
-     * @dev    3. The infrastructure tax account's wrapped native token balance has increased by the recovery tax.
-     *
-     * @param to  The address that receives the stranded wrapped native tokens.
-     * @param amount  The amount of wrapped native tokens to recover.
-     */
-    function recoverWNativeFromZeroAddress(address to, uint256 amount) external {
-        (
-            uint256 recoveryTaxAmount, 
-            uint256 mevAmount
-        ) = _computeRecoverySplits(amount);
-
-        _balanceTransfer(ADDRESS_ZERO, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-        _balanceTransfer(ADDRESS_ZERO, to, mevAmount);
-    }
-
-    /**
-     * @notice Recovers stranded tokens from this contract to the `to` address.
-     *         Stranded tokens of all types (ERC20/ERC721/ERC1155) are occasionally sent to this contract by mistake, 
-     *         and this function allows the stranded tokens to be recovered through a MEV transaction.
-     *
-     * @dev    Throws when the `tokenStandard` is not a valid token standard (20/721/1155).
-     * @dev    Throws when the `token` address is the zero address.
-     * @dev    Throws when the `token` address is not a valid ERC20/ERC721/ERC1155 contract with matching transfer function.
-     * @dev    Throws for 721 and 1155 tokens when the receiver does not implement the correct callback functions for safe transfers.
-     * @dev    Throws when the recovered tokens are not owned by this contract, or the balance is insufficient to fulfill specified amount.
-     *
-     * @dev    <h4>Postconditions:</h4>
-     * @dev    1. The stranded tokens have been transferred from this contract to the `to` address.
-     * @dev    2. For ERC20 tokens, the `to` account has received the stranded tokens, less recovery taxes.
-     * @dev    3. For ERC20 tokens, the infrastructure tax account has received the recovery tax.
-     * @dev    4. For ERC721 tokens, the `to` account has received the stranded token.
-     * @dev    5. For ERC1155 tokens, the `to` account has received the stranded tokens.
-     *
-     * @param tokenStandard  The token standard of the stranded tokens (20/721/1155).
-     * @param token  The address of the stranded token contract.
-     * @param to  The address that receives the stranded tokens.
-     * @param tokenId  The token ID of the stranded ERC721 token.
-     * @param amount  The amount of stranded ERC20/ERC1155 tokens to recover.
-     */
-    function recoverStrandedTokens(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) external {
-        if (tokenStandard == TOKEN_STANDARD_ERC20) {
-            (
-                uint256 recoveryTaxAmount, 
-                uint256 mevAmount
-            ) = _computeRecoverySplits(amount);
-            IRecoverTokens(token).transfer(ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-            IRecoverTokens(token).transfer(to, mevAmount);
-        } else if (tokenStandard == TOKEN_STANDARD_ERC721) {
-            IRecoverTokens(token).safeTransferFrom(address(this), to, tokenId);
-        } else {
-            revert();
-        }
-    }
-
-    //=================================================
     //========= Miscellaneous Helper Functions ========
     //=================================================
 
@@ -753,18 +682,6 @@ contract WrappedNative is EIP712 {
     //=================================================
     //============= Fee Split Calculations ============
     //=================================================
-
-    /**
-     * @dev Helper function that computes the recovery tax and MEV split amounts.
-     * 
-     * @param amount  The amount of wrapped native tokens to split.
-     */
-    function _computeRecoverySplits(
-        uint256 amount
-    ) private pure returns (uint256 recoveryTaxAmount, uint256 mevAmount) {
-        recoveryTaxAmount = amount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
-        mevAmount = amount - recoveryTaxAmount;
-    }
 
     /**
      * @dev Helper function that computes the withdrawal fee split amounts.

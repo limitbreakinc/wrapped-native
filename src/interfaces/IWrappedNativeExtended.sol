@@ -42,14 +42,4 @@ interface IWrappedNativeExtended is IWrappedNative {
         uint256 convenienceFeeBps,
         bytes calldata signedPermit
     ) external;
-
-    // MEV-Based Asset Recovery
-    function recoverWNativeFromZeroAddress(address to, uint256 amount) external;
-    function recoverStrandedTokens(
-        uint256 tokenStandard, 
-        address token, 
-        address to, 
-        uint256 tokenId, 
-        uint256 amount
-    ) external;
 }

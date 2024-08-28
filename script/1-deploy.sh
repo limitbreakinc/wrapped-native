@@ -23,7 +23,7 @@ RESUME=""
 
 # Function to display usage
 usage() {
-    echo "Usage: $0 --gas-price <gas price> --priority-gas-price <priority gas price> --chain-id <chain id>"
+    echo "Usage: $0 --gas-price <gas price> --priority-gas-price <priority gas price>"
     exit 1
 }
 

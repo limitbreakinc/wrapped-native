@@ -474,18 +474,6 @@ contract WrappedNativeHandler is CommonBase, StdCheats, StdUtils {
         }
     }
 
-    function recoverWNativeFromZeroAddress(uint256 toSeed, uint256 amount) public createActor() addActor(ADDRESS_INFRASTRUCTURE_TAX) countCall("recoverWNativeFromZeroAddress") {
-        amount = bound(amount, 0, wnative.balanceOf(address(0)));
-        vm.prank(currentActor);
-        wnative.recoverWNativeFromZeroAddress(_actors.rand(toSeed), amount);
-    }
-
-    function recoverStrandedTokens(uint256 toSeed, uint256 tokenId, uint256 amount) public createActor() addActor(ADDRESS_INFRASTRUCTURE_TAX) countCall("recoverStrandedTokens") {
-        amount = bound(amount, 0, wnative.balanceOf(address(wnative)));
-        vm.prank(currentActor);
-        wnative.recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(wnative), _actors.rand(toSeed), tokenId, amount);
-    }
-
     function sendFallback(uint256 amount) public createActor countCall("sendFallback") {
         amount = bound(amount, 0, address(this).balance);
         _pay(currentActor, amount);

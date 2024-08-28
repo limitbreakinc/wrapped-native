@@ -1392,123 +1392,6 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
     }
 
     //=================================================
-    //=============== Recovery Functions ==============
-    //=================================================
-
-    function testRecoverStrandedWNativeFromZeroAddress(address mev, address to, uint256 amount) public {
-        _sanitizeAddress(mev, new address[](0));
-        _sanitizeAddress(to, new address[](0));
-
-        amount = bound(amount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
-
-        uint256 recoveryTaxAmount = amount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
-        uint256 mevAmount = amount - recoveryTaxAmount;
-
-        vm.deal(address(this), amount);
-        IWrappedNativeExtended(address(weth)).depositTo{value: amount}(ADDRESS_ZERO);
-        
-        vm.prank(mev);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(ADDRESS_ZERO, ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(ADDRESS_ZERO, to, mevAmount);
-        IWrappedNativeExtended(address(weth)).recoverWNativeFromZeroAddress(to, amount);
-
-        assertEq(weth.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
-        assertEq(weth.balanceOf(to), mevAmount);
-    }
-
-    function testRecoverStrandedTokensWNative(address mev, address to, uint256 tokenId, uint256 recoverAmount, uint256 strandedAmount) public {
-        strandedAmount = bound(strandedAmount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
-        recoverAmount = bound(recoverAmount, 0, strandedAmount);
-
-        uint256 recoveryTaxAmount = recoverAmount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
-        uint256 mevAmount = recoverAmount - recoveryTaxAmount;
-
-        _sanitizeAddress(mev, new address[](0));
-        _sanitizeAddress(to, new address[](0));
-
-        vm.deal(address(this), strandedAmount);
-        IWrappedNativeExtended(address(weth)).depositTo{value: strandedAmount}(address(weth));
-
-        vm.prank(mev);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(address(weth), ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(address(weth), to, mevAmount);
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(weth), to, tokenId, recoverAmount);
-
-        assertEq(weth.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
-        assertEq(weth.balanceOf(to), mevAmount);
-    }
-
-    function testRecoverStrandedTokensERC20(address mev, address to, uint256 tokenId, uint256 recoverAmount, uint256 strandedAmount) public {
-        ERC20Mock coin = new ERC20Mock("Coin", "COIN", 18);
-
-        strandedAmount = bound(strandedAmount, 0, type(uint256).max / INFRASTRUCTURE_TAX_BPS);
-        recoverAmount = bound(recoverAmount, 0, strandedAmount);
-
-        uint256 recoveryTaxAmount = recoverAmount * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
-        uint256 mevAmount = recoverAmount - recoveryTaxAmount;
-
-        _sanitizeAddress(mev, new address[](0));
-        _sanitizeAddress(to, new address[](0));
-
-        coin.mint(address(weth), strandedAmount);
-
-        vm.prank(mev);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(address(weth), ADDRESS_INFRASTRUCTURE_TAX, recoveryTaxAmount);
-        vm.expectEmit(true, true, false, true);
-        emit Transfer(address(weth), to, mevAmount);
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(coin), to, tokenId, recoverAmount);
-
-        assertEq(coin.balanceOf(ADDRESS_INFRASTRUCTURE_TAX), recoveryTaxAmount);
-        assertEq(coin.balanceOf(to), mevAmount);
-    }
-
-    function testRecoverStrandedTokensERC721(address mev, address to, uint256 tokenId, uint256 amount) public {
-        ERC721Mock token = new ERC721Mock();
-
-        _sanitizeAddress(mev, new address[](0));
-        _sanitizeAddress(to, new address[](0));
-
-        token.mint(address(weth), tokenId);
-        
-        vm.prank(mev);
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(token), to, tokenId, amount);
-
-        assertTrue(token.ownerOf(tokenId) == to);
-    }
-
-    function testRecoverStrandedTokensRevertsWhenTokenStandardIsInvalid(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) public {
-        if (tokenStandard == TOKEN_STANDARD_ERC20 || tokenStandard == TOKEN_STANDARD_ERC721) {
-            ++tokenStandard;
-        }
-
-        vm.expectRevert();
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(tokenStandard, token, to, tokenId, amount);
-    }
-
-    function testRecoverStrandedTokensRevertsWhenTokenStandardIsValidAndTokenIsZero(address mev, address to, uint256 tokenId, uint256 amount) public {
-        vm.expectRevert();
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(0), to, tokenId, amount);
-
-        vm.expectRevert();
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(0), to, tokenId, amount);
-    }
-
-    function testRecoverStrandedTokensRevertsWhenExpectedTransferFunctionIsNotImplemented(uint256 tokenStandard, address token, address to, uint256 tokenId, uint256 amount) public {
-        ContractMockRejectsNative token = new ContractMockRejectsNative();
-
-        vm.expectRevert();
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC20, address(token), to, tokenId, amount);
-
-        vm.expectRevert();
-        IWrappedNativeExtended(address(weth)).recoverStrandedTokens(TOKEN_STANDARD_ERC721, address(token), to, tokenId, amount);
-    }
-
-    //=================================================
     //===================== Helpers ===================
     //=================================================
 
@@ -1539,9 +1422,7 @@ contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
             selector == IWrappedNativeExtended(address(weth)).revokeMyOutstandingPermits.selector ||
             selector == IWrappedNativeExtended(address(weth)).revokeMyNonce.selector ||
             selector == IWrappedNativeExtended(address(weth)).permitTransfer.selector ||
-            selector == IWrappedNativeExtended(address(weth)).doPermittedWithdraw.selector ||
-            selector == IWrappedNativeExtended(address(weth)).recoverWNativeFromZeroAddress.selector ||
-            selector == IWrappedNativeExtended(address(weth)).recoverStrandedTokens.selector) {
+            selector == IWrappedNativeExtended(address(weth)).doPermittedWithdraw.selector) {
             selector = bytes4(uint32(selector) + 1);
         }
         return selector;
