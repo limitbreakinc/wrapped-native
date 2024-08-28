@@ -14,7 +14,7 @@ contract WrappedNativeInvariants is Test {
         wnative = IWrappedNativeExtended(address(new WrappedNative()));
         handler = new WrappedNativeHandler(wnative);
 
-        bytes4[] memory selectors = new bytes4[](21);
+        bytes4[] memory selectors = new bytes4[](19);
         selectors[0] = WrappedNativeHandler.deposit.selector;
         selectors[1] = WrappedNativeHandler.withdraw.selector;
         selectors[2] = WrappedNativeHandler.sendFallback.selector;
@@ -31,11 +31,9 @@ contract WrappedNativeInvariants is Test {
         selectors[13] = WrappedNativeHandler.doPermittedWithdrawal.selector;
         selectors[14] = WrappedNativeHandler.transferWrappedNativeToZeroAddress.selector;
         selectors[15] = WrappedNativeHandler.depositToZeroAddress.selector;
-        selectors[16] = WrappedNativeHandler.recoverWNativeFromZeroAddress.selector;
-        selectors[17] = WrappedNativeHandler.transferWrappedNativeToWrappedNativeAddress.selector;
-        selectors[18] = WrappedNativeHandler.recoverStrandedTokens.selector;
-        selectors[19] = WrappedNativeHandler.revokeMasterNonce.selector;
-        selectors[20] = WrappedNativeHandler.revokeMyNonce.selector;
+        selectors[16] = WrappedNativeHandler.transferWrappedNativeToWrappedNativeAddress.selector;
+        selectors[17] = WrappedNativeHandler.revokeMasterNonce.selector;
+        selectors[18] = WrappedNativeHandler.revokeMyNonce.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
 

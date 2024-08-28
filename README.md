@@ -12,8 +12,6 @@ Wrapped Native features the following improvements over WETH9.
  - **`withdrawToAccount`** - allows a withdrawer to withdraw to a different address.
  - **`withdrawSplit`** - allows a withdrawer to withdraw and send native tokens to several addresses at once.
  - **Permit Functions** - allows for transfers and withdrawals to be approved to spenders/operators gaslessly using EIP-712 signatures. Permitted withdrawals allow gas sponsorship to unwrap wrapped native tokens on the user's behalf, for a small convenience fee specified by the app. This is useful when user has no native tokens on a new chain but they have received wrapped native tokens.
- - **Lost Token Recovery** - allows anyone to recover ERC20/721/1155 tokens that were accidentally sent to this contract.
- - **Lost Wrapped Native Recovery** - allows anyone to recover wrapped native tokens that were accidentally sent to the zero address that would be otherwise lost.
 
 ## Usage
 
