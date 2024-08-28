@@ -537,8 +537,6 @@ contract WrappedNativeHandler is CommonBase, StdCheats, StdUtils {
         console.log("revokeMyNonce", calls["revokeMyNonce"]);
         console.log("permitTransfer", calls["permitTransfer"]);
         console.log("doPermittedWithdrawal", calls["doPermittedWithdrawal"]);
-        console.log("recoverWNativeFromZeroAddress", calls["recoverWNativeFromZeroAddress"]);
-        console.log("recoverStrandedTokens", calls["recoverStrandedTokens"]);
         console.log("-------------------");
 
         console.log("Zero withdrawals:", ghost_zeroWithdrawals);
