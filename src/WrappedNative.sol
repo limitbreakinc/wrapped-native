@@ -35,10 +35,10 @@ contract WrappedNative is EIP712 {
     mapping (address => mapping (uint256 => uint256)) private _permitNonces;
 
     /// @notice Stores the wrapped native token balance of each user.
-    mapping (address => uint256) public  balanceOf;
+    mapping (address => uint256) public balanceOf;
 
     /// @notice Stores the wrapped native token allowance for each user/spender pair.
-    mapping (address => mapping (address => uint)) public  allowance;
+    mapping (address => mapping (address => uint)) public allowance;
 
     constructor() EIP712(NAME, VERSION) {}
 
