@@ -611,18 +611,19 @@ contract WrappedNative is EIP712 {
      */
     function _balanceTransfer(address from, address to, uint256 amount) private {
         assembly {
-            mstore(0x00, to)
-            mstore(0x20, balanceOf.slot)
-            let balanceSlotTo := keccak256(0x00, 0x40)
-            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
-    
             mstore(0x00, from)
+            mstore(0x20, balanceOf.slot)
             let balanceSlotFrom := keccak256(0x00, 0x40)
             let balanceValFrom := sload(balanceSlotFrom)
             if lt(balanceValFrom, amount) {
                 revert(0,0)
             }
+    
             sstore(balanceSlotFrom, sub(balanceValFrom, amount))
+
+            mstore(0x00, to)
+            let balanceSlotTo := keccak256(0x00, 0x40)
+            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
 
             mstore(0x00, amount)
             log3(0x00, 0x20, TRANSFER_EVENT_TOPIC_0, from, to)
