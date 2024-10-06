@@ -346,12 +346,8 @@ contract WrappedNative is EIP712 {
         }
 
         assembly {
-            mstore(0x00, to)
-            mstore(0x20, balanceOf.slot)
-            let balanceSlotTo := keccak256(0x00, 0x40)
-            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
-    
             mstore(0x00, from)
+            mstore(0x20, balanceOf.slot)
             let balanceSlotFrom := keccak256(0x00, 0x40)
             let balanceValFrom := sload(balanceSlotFrom)
             if lt(balanceValFrom, amount) {
@@ -359,7 +355,12 @@ contract WrappedNative is EIP712 {
             }
             sstore(balanceSlotFrom, sub(balanceValFrom, amount))
 
+            mstore(0x00, to)
+            let balanceSlotTo := keccak256(0x00, 0x40)
+            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
+
             if iszero(eq(from, caller())) {
+                mstore(0x00, from)
                 mstore(0x20, allowance.slot)
                 mstore(0x20, keccak256(0x00, 0x40))
                 mstore(0x00, caller())
@@ -618,7 +619,6 @@ contract WrappedNative is EIP712 {
             if lt(balanceValFrom, amount) {
                 revert(0,0)
             }
-    
             sstore(balanceSlotFrom, sub(balanceValFrom, amount))
 
             mstore(0x00, to)
