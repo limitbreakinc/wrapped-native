@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import "./IWrappedNative.sol";
+import "./IWrappedNativeExtended.sol";
+
 string constant VERSION = "1";
 string constant NAME = "Wrapped Native";
 string constant SYMBOL = "WNATIVE";
@@ -27,10 +30,10 @@ bytes32 constant PERMIT_TRANSFER_TYPEHASH =
 bytes32 constant PERMIT_WITHDRAWAL_TYPEHASH =
     keccak256("PermitWithdrawal(address operator,uint256 amount,uint256 nonce,uint256 expiration,uint256 masterNonce,address to,address convenienceFeeReceiver,uint256 convenienceFeeBps)");
 
-bytes4 constant SELECTOR_IS_NONCE_USED = bytes4(keccak256("isNonceUsed(address,uint256)"));
-bytes4 constant SELECTOR_MASTER_NONCES = bytes4(keccak256("masterNonces(address)"));
-bytes4 constant SELECTOR_TOTAL_SUPPLY = bytes4(keccak256("totalSupply()"));
-bytes4 constant SELECTOR_DOMAIN_SEPARATOR_V4 = bytes4(keccak256("domainSeparatorV4()"));
-bytes4 constant SELECTOR_NAME = bytes4(keccak256("name()"));
-bytes4 constant SELECTOR_SYMBOL = bytes4(keccak256("symbol()"));
-bytes4 constant SELECTOR_DECIMALS = bytes4(keccak256("decimals()"));
+bytes4 constant SELECTOR_IS_NONCE_USED = IWrappedNativeExtended.isNonceUsed.selector;
+bytes4 constant SELECTOR_MASTER_NONCES = IWrappedNativeExtended.masterNonces.selector;
+bytes4 constant SELECTOR_TOTAL_SUPPLY = IWrappedNative.totalSupply.selector;
+bytes4 constant SELECTOR_DOMAIN_SEPARATOR_V4 = IWrappedNativeExtended.domainSeparatorV4.selector;
+bytes4 constant SELECTOR_NAME = IWrappedNative.name.selector;
+bytes4 constant SELECTOR_SYMBOL = IWrappedNative.symbol.selector;
+bytes4 constant SELECTOR_DECIMALS = IWrappedNative.decimals.selector;
