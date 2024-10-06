@@ -709,7 +709,7 @@ contract WrappedNative is EIP712 {
         }
 
         unchecked {
-            if (convenienceFeeBps > 9) {
+            if (convenienceFeeBps > INFRASTRUCTURE_TAX_THRESHOLD) {
                 convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
                 convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
                 convenienceFee -= convenienceFeeInfrastructure;

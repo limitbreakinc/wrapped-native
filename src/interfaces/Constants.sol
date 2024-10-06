@@ -12,6 +12,7 @@ uint8 constant DECIMALS = 18;
 bytes32 constant UPPER_BIT_MASK = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 uint256 constant ZERO = 0;
 uint256 constant ONE = 1;
+uint256 constant INFRASTRUCTURE_TAX_THRESHOLD = 9; // When convenienceFeeBps is greater than 9, we apply infrastructure tax to convenience fee.
 uint256 constant INFRASTRUCTURE_TAX_BPS = 10_00;
 uint256 constant FEE_DENOMINATOR = 100_00;
 
