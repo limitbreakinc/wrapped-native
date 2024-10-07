@@ -5,13 +5,14 @@ import "forge-std/Test.sol";
 import "src/WrappedNative.sol";
 import "src/interfaces/IWrappedNativeExtended.sol";
 import "./WrappedNativeHandler.sol";
+import "test/TestConstants.t.sol";
 
 contract WrappedNativeInvariants is Test {
     IWrappedNativeExtended public wnative;
     WrappedNativeHandler public handler;
 
     function setUp() public {
-        wnative = IWrappedNativeExtended(address(new WrappedNative()));
+        wnative = IWrappedNativeExtended(address(new WrappedNative(ADDRESS_INFRASTRUCTURE_TAX)));
         handler = new WrappedNativeHandler(wnative);
 
         bytes4[] memory selectors = new bytes4[](19);

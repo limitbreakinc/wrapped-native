@@ -8,6 +8,7 @@ import "test/mocks/ContractMockRejectsNative.sol";
 import "test/mocks/ERC20Mock.sol";
 import "test/mocks/ERC721Mock.sol";
 import "test/mocks/ERC1155Mock.sol";
+import "test/TestConstants.t.sol";
 
 contract WrappedNativeExtendedFeaturesTest is WrappedNativeTest {
     event PermitNonceInvalidated(address indexed account,uint256 indexed nonce);

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+import "./interfaces/IWrappedNative.sol";
+import "./interfaces/IWrappedNativeExtended.sol";
+
 string constant VERSION = "1";
 string constant NAME = "Wrapped Native";
 string constant SYMBOL = "WNATIVE";
@@ -9,10 +12,9 @@ uint8 constant DECIMALS = 18;
 bytes32 constant UPPER_BIT_MASK = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 uint256 constant ZERO = 0;
 uint256 constant ONE = 1;
-uint256 constant INFRASTRUCTURE_TAX_BPS = 1_000;
-uint256 constant FEE_DENOMINATOR = 10_000;
-
-address constant ADDRESS_INFRASTRUCTURE_TAX = address(0x0); // TODO
+uint256 constant INFRASTRUCTURE_TAX_THRESHOLD = 9; // When convenienceFeeBps is greater than 9, we apply infrastructure tax to convenience fee.
+uint256 constant INFRASTRUCTURE_TAX_BPS = 10_00;
+uint256 constant FEE_DENOMINATOR = 100_00;
 
 uint256 constant WITHDRAWAL_EVENT_TOPIC_0 = 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65;
 uint256 constant DEPOSIT_EVENT_TOPIC_0 = 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c;
@@ -27,10 +29,10 @@ bytes32 constant PERMIT_TRANSFER_TYPEHASH =
 bytes32 constant PERMIT_WITHDRAWAL_TYPEHASH =
     keccak256("PermitWithdrawal(address operator,uint256 amount,uint256 nonce,uint256 expiration,uint256 masterNonce,address to,address convenienceFeeReceiver,uint256 convenienceFeeBps)");
 
-bytes4 constant SELECTOR_IS_NONCE_USED = bytes4(keccak256("isNonceUsed(address,uint256)"));
-bytes4 constant SELECTOR_MASTER_NONCES = bytes4(keccak256("masterNonces(address)"));
-bytes4 constant SELECTOR_TOTAL_SUPPLY = bytes4(keccak256("totalSupply()"));
-bytes4 constant SELECTOR_DOMAIN_SEPARATOR_V4 = bytes4(keccak256("domainSeparatorV4()"));
-bytes4 constant SELECTOR_NAME = bytes4(keccak256("name()"));
-bytes4 constant SELECTOR_SYMBOL = bytes4(keccak256("symbol()"));
-bytes4 constant SELECTOR_DECIMALS = bytes4(keccak256("decimals()"));
+bytes4 constant SELECTOR_IS_NONCE_USED = IWrappedNativeExtended.isNonceUsed.selector;
+bytes4 constant SELECTOR_MASTER_NONCES = IWrappedNativeExtended.masterNonces.selector;
+bytes4 constant SELECTOR_TOTAL_SUPPLY = IWrappedNative.totalSupply.selector;
+bytes4 constant SELECTOR_DOMAIN_SEPARATOR_V4 = IWrappedNativeExtended.domainSeparatorV4.selector;
+bytes4 constant SELECTOR_NAME = IWrappedNative.name.selector;
+bytes4 constant SELECTOR_SYMBOL = IWrappedNative.symbol.selector;
+bytes4 constant SELECTOR_DECIMALS = IWrappedNative.decimals.selector;
