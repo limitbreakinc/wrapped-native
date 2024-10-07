@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "./interfaces/Constants.sol";
+import "./Constants.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 
@@ -40,7 +40,12 @@ contract WrappedNative is EIP712 {
     /// @notice Stores the wrapped native token allowance for each user/spender pair.
     mapping (address => mapping (address => uint)) public allowance;
 
-    constructor() EIP712(NAME, VERSION) {}
+    /// @notice Address that will receive infrastructure fee taxes on permit transfers.
+    address immutable ADDRESS_INFRASTRUCTURE_TAX;
+
+    constructor(address infrastructureTaxRecipient) EIP712(NAME, VERSION) {
+        ADDRESS_INFRASTRUCTURE_TAX = infrastructureTaxRecipient;
+    }
 
     //=================================================
     //== Deposit / Fallback Function Implementations ==

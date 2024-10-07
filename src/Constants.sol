@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "./IWrappedNative.sol";
-import "./IWrappedNativeExtended.sol";
+import "./interfaces/IWrappedNative.sol";
+import "./interfaces/IWrappedNativeExtended.sol";
 
 string constant VERSION = "1";
 string constant NAME = "Wrapped Native";
@@ -15,8 +15,6 @@ uint256 constant ONE = 1;
 uint256 constant INFRASTRUCTURE_TAX_THRESHOLD = 9; // When convenienceFeeBps is greater than 9, we apply infrastructure tax to convenience fee.
 uint256 constant INFRASTRUCTURE_TAX_BPS = 10_00;
 uint256 constant FEE_DENOMINATOR = 100_00;
-
-address constant ADDRESS_INFRASTRUCTURE_TAX = address(0x0); // TODO
 
 uint256 constant WITHDRAWAL_EVENT_TOPIC_0 = 0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65;
 uint256 constant DEPOSIT_EVENT_TOPIC_0 = 0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c;
