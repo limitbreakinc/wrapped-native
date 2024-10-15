@@ -87,6 +87,9 @@ contract WrappedNative is EIP712 {
                 }
             } else if (msg.sig == SELECTOR_MASTER_NONCES) { // masterNonces(address account)
                 assembly {
+                    if lt(calldatasize(), 0x24) {
+                        revert(0,0)
+                    }
                     mstore(0x00, shr(0x60, shl(0x60, calldataload(0x04))))
                     mstore(0x20, _masterNonces.slot)
                     mstore(0x00, sload(keccak256(0x00, 0x40)))
