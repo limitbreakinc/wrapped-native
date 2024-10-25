@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "./interfaces/Constants.sol";
+import "./Constants.sol";
 import "./utils/EIP712.sol";
 import "./utils/Math.sol";
 
@@ -35,12 +35,17 @@ contract WrappedNative is EIP712 {
     mapping (address => mapping (uint256 => uint256)) private _permitNonces;
 
     /// @notice Stores the wrapped native token balance of each user.
-    mapping (address => uint256) public  balanceOf;
+    mapping (address => uint256) public balanceOf;
 
     /// @notice Stores the wrapped native token allowance for each user/spender pair.
-    mapping (address => mapping (address => uint)) public  allowance;
+    mapping (address => mapping (address => uint)) public allowance;
 
-    constructor() EIP712(NAME, VERSION) {}
+    /// @notice Address that will receive infrastructure fee taxes on permit transfers.
+    address immutable ADDRESS_INFRASTRUCTURE_TAX;
+
+    constructor(address infrastructureTaxRecipient) EIP712(NAME, VERSION) {
+        ADDRESS_INFRASTRUCTURE_TAX = infrastructureTaxRecipient;
+    }
 
     //=================================================
     //== Deposit / Fallback Function Implementations ==
@@ -82,6 +87,9 @@ contract WrappedNative is EIP712 {
                 }
             } else if (msg.sig == SELECTOR_MASTER_NONCES) { // masterNonces(address account)
                 assembly {
+                    if lt(calldatasize(), 0x24) {
+                        revert(0,0)
+                    }
                     mstore(0x00, shr(0x60, shl(0x60, calldataload(0x04))))
                     mstore(0x20, _masterNonces.slot)
                     mstore(0x00, sload(keccak256(0x00, 0x40)))
@@ -346,12 +354,8 @@ contract WrappedNative is EIP712 {
         }
 
         assembly {
-            mstore(0x00, to)
-            mstore(0x20, balanceOf.slot)
-            let balanceSlotTo := keccak256(0x00, 0x40)
-            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
-    
             mstore(0x00, from)
+            mstore(0x20, balanceOf.slot)
             let balanceSlotFrom := keccak256(0x00, 0x40)
             let balanceValFrom := sload(balanceSlotFrom)
             if lt(balanceValFrom, amount) {
@@ -359,7 +363,12 @@ contract WrappedNative is EIP712 {
             }
             sstore(balanceSlotFrom, sub(balanceValFrom, amount))
 
+            mstore(0x00, to)
+            let balanceSlotTo := keccak256(0x00, 0x40)
+            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
+
             if iszero(eq(from, caller())) {
+                mstore(0x00, from)
                 mstore(0x20, allowance.slot)
                 mstore(0x20, keccak256(0x00, 0x40))
                 mstore(0x00, caller())
@@ -611,18 +620,18 @@ contract WrappedNative is EIP712 {
      */
     function _balanceTransfer(address from, address to, uint256 amount) private {
         assembly {
-            mstore(0x00, to)
-            mstore(0x20, balanceOf.slot)
-            let balanceSlotTo := keccak256(0x00, 0x40)
-            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
-    
             mstore(0x00, from)
+            mstore(0x20, balanceOf.slot)
             let balanceSlotFrom := keccak256(0x00, 0x40)
             let balanceValFrom := sload(balanceSlotFrom)
             if lt(balanceValFrom, amount) {
                 revert(0,0)
             }
             sstore(balanceSlotFrom, sub(balanceValFrom, amount))
+
+            mstore(0x00, to)
+            let balanceSlotTo := keccak256(0x00, 0x40)
+            sstore(balanceSlotTo, add(sload(balanceSlotTo), amount))
 
             mstore(0x00, amount)
             log3(0x00, 0x20, TRANSFER_EVENT_TOPIC_0, from, to)
@@ -708,7 +717,7 @@ contract WrappedNative is EIP712 {
         }
 
         unchecked {
-            if (convenienceFeeBps > 9) {
+            if (convenienceFeeBps > INFRASTRUCTURE_TAX_THRESHOLD) {
                 convenienceFee = amount * convenienceFeeBps / FEE_DENOMINATOR;
                 convenienceFeeInfrastructure = convenienceFee * INFRASTRUCTURE_TAX_BPS / FEE_DENOMINATOR;
                 convenienceFee -= convenienceFeeInfrastructure;

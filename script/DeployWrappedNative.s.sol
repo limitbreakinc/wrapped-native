@@ -8,7 +8,8 @@ import "src/WrappedNative.sol";
 contract DeployWrappedNative is Script {
     function run() public {
         vm.startBroadcast(vm.envUint("DEPLOYER_KEY"));
-        address deployed = address(new WrappedNative{salt: bytes32(vm.envUint("SALT_WRAPPED_NATIVE"))}());
+        address infrastructureTaxRecipient = vm.envAddress("ADDRESS_INFRASTRUCTURE_TAX");
+        address deployed = address(new WrappedNative{salt: bytes32(vm.envUint("SALT_WRAPPED_NATIVE"))}(infrastructureTaxRecipient));
         vm.stopBroadcast();
 
         console.log("WrappedNative: ", deployed);
