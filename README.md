@@ -13,6 +13,10 @@ Wrapped Native features the following improvements over WETH9.
  - **`withdrawSplit`** - allows a withdrawer to withdraw and send native tokens to several addresses at once.
  - **Permit Functions** - allows for transfers and withdrawals to be approved to spenders/operators gaslessly using EIP-712 signatures. Permitted withdrawals allow gas sponsorship to unwrap wrapped native tokens on the user's behalf, for a small convenience fee specified by the app. This is useful when user has no native tokens on a new chain but they have received wrapped native tokens.
 
+## Deployment
+
+Wrapped Native can be deployed to any EVM blockchain at address `0x6000030000842044000077551D00cfc6b4005900` using Limit Break's infrastructure deployment tool at https://developers.erc721c.com/infrastructure.
+
 ## Usage
 
 ### Build
